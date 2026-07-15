@@ -43,7 +43,6 @@ jobs:
           CS_API_KEY=${{ secrets.CS_API_KEY }}
           CS_DELIVERY_TOKEN=${{ secrets.CS_DELIVERY_TOKEN }}
           CS_MANAGEMENT_TOKEN=${{ secrets.CS_MANAGEMENT_TOKEN }}
-          CS_ACCESS_TOKEN=${{ secrets.CS_ACCESS_TOKEN }}
           CS_REGION=${{ secrets.CS_REGION || 'us' }}
           POSTMAN_API_KEY=${{ secrets.POSTMAN_API_KEY }}
           POSTMAN_CDA_COLLECTION_ID=${{ secrets.POSTMAN_CDA_COLLECTION_ID }}
