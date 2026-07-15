@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
-import { TryOutTestResult } from '../config/types';
+import { TryOutTestResult } from '../../config/types';
 
 dotenv.config();
 
@@ -13,7 +13,7 @@ const DELIVERY_TOKEN = process.env.CS_DELIVERY_TOKEN ?? '';
 // independently of this project, so hardcoded UIDs go stale silently and
 // every dependent Try Out test starts failing with a misleading 404/422).
 // Hardcoded values below are last-resort fallbacks if that fetch failed.
-import { LIVE_DATA_PATH } from './globalSetup';
+import { LIVE_DATA_PATH } from '../globalSetup';
 const liveData: Record<string, string> = fs.existsSync(LIVE_DATA_PATH)
   ? JSON.parse(fs.readFileSync(LIVE_DATA_PATH, 'utf-8'))
   : {};
@@ -38,13 +38,13 @@ const SKIP_ERROR_REQUESTS = new Set([
   'Get a single taxonomy',        // CMA-only endpoint; delivery token returns 404
 ]);
 
-const scrapedPath = path.join(__dirname, '../reports/scraped-requests.json');
+const scrapedPath = path.join(__dirname, '../../reports/scraped-requests.json');
 const scrapedRequests = fs.existsSync(scrapedPath)
   ? JSON.parse(fs.readFileSync(scrapedPath, 'utf-8'))
   : [];
 
-const RESULTS_PATH = path.join(__dirname, '../reports/tryout-results.json');
-const INDIVIDUAL_DIR = path.join(__dirname, '../reports/individual');
+const RESULTS_PATH = path.join(__dirname, '../../reports/tryout-results.json');
+const INDIVIDUAL_DIR = path.join(__dirname, '../../reports/individual');
 
 // Each test saves to its own file — retry just overwrites that one file, never touches others
 function saveResult(result: TryOutTestResult): void {

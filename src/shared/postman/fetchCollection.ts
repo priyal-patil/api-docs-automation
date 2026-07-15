@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
-import { PostmanRequest, PostmanParam } from '../../config/types';
+import { PostmanRequest, PostmanParam } from '../../../config/types';
 
 dotenv.config();
 
@@ -67,7 +67,7 @@ export async function fetchPostmanCollection(collectionId?: string, outputFilena
 
   // Cache to disk for offline use / debugging
   const filename = outputFilename ?? 'postman-collection.json';
-  const outPath = path.join(__dirname, '../../reports', filename);
+  const outPath = path.join(__dirname, '../../../reports', filename);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, JSON.stringify(requests, null, 2));
   console.log(`✅  Fetched ${requests.length} Postman requests → ${outPath}`);

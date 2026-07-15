@@ -3,7 +3,7 @@ import axios, { AxiosResponse } from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
-import { ApiTestResult } from '../../config/types';
+import { ApiTestResult } from '../../../config/types';
 
 dotenv.config();
 
@@ -206,7 +206,7 @@ describe('Content Delivery API — Sync', () => {
 import { afterAll } from 'vitest';
 
 afterAll(() => {
-  const outPath = path.join(__dirname, '../../reports/api-test-results.json');
+  const outPath = path.join(__dirname, '../../../reports/api-test-results.json');
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, JSON.stringify(results, null, 2));
   console.log(`\n📝  API test results saved → ${outPath}`);

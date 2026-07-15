@@ -2,7 +2,7 @@ import { chromium, Page } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
-import { DocRequest, DocParam, DocHeader, TryOutData, TryOutField } from '../../config/types';
+import { DocRequest, DocParam, DocHeader, TryOutData, TryOutField } from '../../../config/types';
 
 dotenv.config();
 
@@ -165,7 +165,7 @@ async function scrapeAll(): Promise<ScrapedRequest[]> {
   );
   const results = perModuleResults.flat();
 
-  const outPath = path.join(__dirname, '../../reports/scraped-requests.json');
+  const outPath = path.join(__dirname, '../../../reports/scraped-requests.json');
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, JSON.stringify(results, null, 2));
   console.log(`\n✅  Scraped ${results.length} individual requests → ${outPath}`);

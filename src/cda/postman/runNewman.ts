@@ -3,7 +3,7 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
-import { NewmanResult } from '../../config/types';
+import { NewmanResult } from '../../../config/types';
 
 dotenv.config();
 
@@ -227,7 +227,7 @@ function hasUnresolvedVariable(url: string): boolean {
  */
 function loadQueriesDefaults(): Map<string, Record<string, string>> {
   const map = new Map<string, Record<string, string>>();
-  const scrapedPath = path.join(__dirname, '../../reports/scraped-requests.json');
+  const scrapedPath = path.join(__dirname, '../../../reports/scraped-requests.json');
   if (!fs.existsSync(scrapedPath)) return map;
 
   const scraped: Array<{ doc: { module: string; name: string }; tryOut: { params: Array<{ name: string; defaultValue?: string }> } }> =
@@ -362,7 +362,7 @@ export async function runNewman(): Promise<NewmanResult[]> {
     );
   });
 
-  const outPath = path.join(__dirname, '../../reports/newman-results.json');
+  const outPath = path.join(__dirname, '../../../reports/newman-results.json');
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, JSON.stringify(results, null, 2));
 

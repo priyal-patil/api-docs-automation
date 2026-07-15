@@ -3,7 +3,7 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
-import { NewmanResult } from '../../config/types';
+import { NewmanResult } from '../../../config/types';
 
 dotenv.config();
 
@@ -419,7 +419,7 @@ export async function runNewmanCMA(): Promise<NewmanResult[]> {
     );
   });
 
-  const outPath = path.join(__dirname, '../../reports/newman-results-cma.json');
+  const outPath = path.join(__dirname, '../../../reports/newman-results-cma.json');
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, JSON.stringify(results, null, 2));
 

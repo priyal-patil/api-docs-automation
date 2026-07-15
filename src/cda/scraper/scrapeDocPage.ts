@@ -1,5 +1,5 @@
 import { Page } from '@playwright/test';
-import { DocRequest, DocParam, DocHeader, TryOutField, TryOutData } from '../../config/types';
+import { DocRequest, DocParam, DocHeader, TryOutField, TryOutData } from '../../../config/types';
 
 /**
  * Scrapes a single request section from the doc page.

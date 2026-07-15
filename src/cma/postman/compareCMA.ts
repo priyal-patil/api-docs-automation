@@ -1,13 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
-import { fetchPostmanCollection } from './fetchCollection';
-import { ComparisonResult, Mismatch, DocRequest, TryOutData, TryOutTestResult, NewmanResult, PostmanRequest } from '../../config/types';
+import { fetchPostmanCollection } from '../../shared/postman/fetchCollection';
+import { ComparisonResult, Mismatch, DocRequest, TryOutData, TryOutTestResult, NewmanResult, PostmanRequest } from '../../../config/types';
 
 dotenv.config();
 
 /**
- * Three-way comparison:
+ * Three-way comparison for the Content Management API (CMA):
  *   A = Doc description (scraped params/headers)
  *   B = Try Out panel (fields + response body captured by Playwright)
  *   C = Postman collection definition + Newman execution results
@@ -19,39 +19,48 @@ dotenv.config();
  *  4. Newman execution failures (Postman request returned 4xx/5xx)
  *  5. Default error code shown in Try Out before Send is clicked
  */
-export async function runComparison(): Promise<ComparisonResult[]> {
+// Universal auth/infra headers documented globally, not per endpoint (norm()-ed).
+const GLOBAL_HEADERS = new Set([
+  'apikey', 'authtoken', 'managementtoken',
+  'contenttype', 'branch', 'authorization', 'xcsvariantuid',
+]);
+
+export async function runComparisonCMA(): Promise<ComparisonResult[]> {
   // ── Load scraped data ────────────────────────────────────────────────────
-  const scrapedPath = path.join(__dirname, '../../reports/scraped-requests.json');
+  const scrapedPath = path.join(__dirname, '../../../reports/scraped-requests-cma.json');
   if (!fs.existsSync(scrapedPath)) {
-    throw new Error('scraped-requests.json not found — run `npm run scrape` first');
+    throw new Error('scraped-requests-cma.json not found — run `npm run scrape:cma` first');
   }
   const scraped: Array<{ doc: DocRequest; tryOut: TryOutData }> = JSON.parse(
     fs.readFileSync(scrapedPath, 'utf-8')
   );
 
   // ── Load Try Out execution results (response bodies captured by Playwright) ──
-  const tryOutResultsPath = path.join(__dirname, '../../reports/tryout-results.json');
+  const tryOutResultsPath = path.join(__dirname, '../../../reports/tryout-results-cma.json');
   const tryOutResults: TryOutTestResult[] = fs.existsSync(tryOutResultsPath)
     ? JSON.parse(fs.readFileSync(tryOutResultsPath, 'utf-8'))
     : [];
 
   // ── Load Newman execution results ────────────────────────────────────────
-  const newmanResultsPath = path.join(__dirname, '../../reports/newman-results.json');
+  const newmanResultsPath = path.join(__dirname, '../../../reports/newman-results-cma.json');
   const newmanResults: NewmanResult[] = fs.existsSync(newmanResultsPath)
     ? JSON.parse(fs.readFileSync(newmanResultsPath, 'utf-8'))
     : [];
 
   // ── Fetch Postman collection definitions ────────────────────────────────
   let postmanRequests: PostmanRequest[] = [];
-  const cachedPostman = path.join(__dirname, '../../reports/postman-collection.json');
+  const cachedPostman = path.join(__dirname, '../../../reports/postman-collection-cma.json');
   try {
-    postmanRequests = await fetchPostmanCollection();
+    postmanRequests = await fetchPostmanCollection(
+      '32962131-18e02df1-9ca6-4e37-a686-6763aaf81129',
+      'postman-collection-cma.json'
+    );
   } catch {
     if (fs.existsSync(cachedPostman)) {
-      console.warn('⚠️  Using cached Postman collection (live fetch failed)');
+      console.warn('⚠️  Using cached Postman CMA collection (live fetch failed)');
       postmanRequests = JSON.parse(fs.readFileSync(cachedPostman, 'utf-8'));
     } else {
-      throw new Error('Postman collection unavailable — check POSTMAN_API_KEY and POSTMAN_CDA_COLLECTION_ID');
+      throw new Error('Postman CMA collection unavailable — check POSTMAN_API_KEY');
     }
   }
 
@@ -78,13 +87,26 @@ export async function runComparison(): Promise<ComparisonResult[]> {
       name: f.name, type: f.type, required: false, description: '',
     }));
 
-    const docParamNames    = new Set(effectiveDocParams.map(p => norm(p.name)));
-    const tryOutParamNames = new Set(tryOut.params.map(p => norm(p.name)));
+    const docParamNames    = new Set(effectiveDocParams.map(p => normParam(p.name)));
+    const tryOutParamNames = new Set(tryOut.params.map(p => normParam(p.name)));
+
+    // Postman-derived name sets (empty when no matching Postman request) — computed
+    // upfront so the Doc ↔ Try Out checks can also use them to suppress noise.
+    // Path variables (e.g. {{entry_uid}}) live in the URL path, not query params.
+    const postmanAllParamNames = new Set((postmanReq?.params ?? []).map(p => norm(p.key)));
+    const postmanHeaderNames   = new Set((postmanReq?.headers ?? []).map(h => norm(h.key)));
+    const pathVarNames = new Set(
+      Array.from((postmanReq?.url ?? '').matchAll(/\{\{(\w+)\}\}/g)).map(m => norm(m[1]))
+    );
+    const docHeaderNames = new Set(doc.headers.map(h => norm(h.name)));
 
     // Only compare Doc ↔ Try Out when the scraper found actual doc tables
     if (doc.params.length > 0) {
       for (const p of doc.params) {
-        if (!tryOutParamNames.has(norm(p.name))) {
+        // Body/form-data fields (asset[upload]) are entered in the body editor, not as param inputs
+        if (isBodyField(p.name)) continue;
+        if (GLOBAL_HEADERS.has(normParam(p.name))) continue;
+        if (!tryOutParamNames.has(normParam(p.name))) {
           mismatches.push({
             type: 'missing_in_tryout', field: p.name,
             source: 'Doc → Try Out',
@@ -94,7 +116,11 @@ export async function runComparison(): Promise<ComparisonResult[]> {
         }
       }
       for (const f of tryOut.params) {
-        if (!docParamNames.has(norm(f.name))) {
+        // Skip global headers and URL path variables — the panel shows them as inputs
+        // but the doc's param table legitimately documents them elsewhere
+        if (GLOBAL_HEADERS.has(normParam(f.name))) continue;
+        if (pathVarNames.has(normParam(f.name))) continue;
+        if (!docParamNames.has(normParam(f.name))) {
           mismatches.push({
             type: 'extra_in_tryout', field: f.name,
             source: 'Try Out → Doc',
@@ -106,26 +132,11 @@ export async function runComparison(): Promise<ComparisonResult[]> {
     }
 
     if (postmanReq) {
-      // Active params (enabled) — used to detect params Postman actively sends but aren't in docs
-      const postmanActiveParamNames = new Set(
-        postmanReq.params.filter(p => !p.disabled).map(p => norm(p.key))
-      );
-      // All params (enabled + disabled) — used to detect params docs describe but aren't in Postman at all.
-      // A disabled param means "supported but not sent by default", NOT "unsupported".
-      const postmanAllParamNames = new Set(
-        postmanReq.params.map(p => norm(p.key))
-      );
-
-      // Extract path variable names from Postman URL (e.g. {{entry_uid}} → entry_uid).
-      // These are NOT query params — they live in the URL path — so we must not flag
-      // them as "missing in Postman" when the doc/Try Out panel lists them as inputs.
-      const pathVarNames = new Set(
-        Array.from((postmanReq.url ?? '').matchAll(/\{\{(\w+)\}\}/g)).map(m => norm(m[1]))
-      );
-
-      // Postman active params missing from doc/tryout (only flag actively-sent params)
+      // Postman active params missing from doc/tryout (only flag actively-sent params).
+      // Cross-check doc headers too — docs sometimes list the same name as a header.
       for (const p of postmanReq.params.filter(p => !p.disabled)) {
-        if (!docParamNames.has(norm(p.key)) && !tryOutParamNames.has(norm(p.key))) {
+        if (!docParamNames.has(norm(p.key)) && !tryOutParamNames.has(norm(p.key))
+            && !docHeaderNames.has(norm(p.key))) {
           mismatches.push({
             type: 'missing_in_doc', field: p.key,
             source: 'Postman → Doc/Try Out',
@@ -134,47 +145,46 @@ export async function runComparison(): Promise<ComparisonResult[]> {
           });
         }
       }
-      // Doc/tryout params missing from Postman entirely — skip path variables and disabled-but-present params
+      // Doc/tryout params missing from Postman entirely — skip path variables,
+      // disabled-but-present params, global headers, body/form-data fields, and
+      // names Postman carries as a *header* instead of a query param.
       for (const p of effectiveDocParams) {
-        if (!postmanAllParamNames.has(norm(p.name)) && !pathVarNames.has(norm(p.name))) {
-          mismatches.push({
-            type: 'missing_in_postman', field: p.name,
-            source: 'Doc/Try Out → Postman',
-            detail: `Doc/Try Out has param "${p.name}" but Postman collection does not have it (even as disabled)`,
-            severity: 'warning',
-          });
-        }
+        const n = normParam(p.name);
+        if (isBodyField(p.name)) continue;
+        if (GLOBAL_HEADERS.has(n)) continue;
+        if (postmanAllParamNames.has(n) || pathVarNames.has(n) || postmanHeaderNames.has(n)) continue;
+        mismatches.push({
+          type: 'missing_in_postman', field: p.name,
+          source: 'Doc/Try Out → Postman',
+          detail: `Doc/Try Out has param "${p.name}" but Postman collection does not have it (even as disabled)`,
+          severity: 'warning',
+        });
       }
 
       // Headers — skip universal auth/infra headers documented globally, not per endpoint.
-      // Stored as norm()-ed values (lowercase, alphanumeric only).
-      const GLOBAL_HEADERS = new Set([
-        'apikey', 'accesstoken', 'deliverytoken', 'authtoken', 'managementtoken',
-        'contenttype', 'branch', 'authorization', 'xcsvariantuid',
-      ]);
-      const docHeaderNames     = new Set(doc.headers.map(h => norm(h.name)));
-      const postmanHeaderNames = new Set(postmanReq.headers.map(h => norm(h.key)));
+      // Cross-check the other source's params too: the same name documented as a param
+      // (or sent by Postman as a query param) is a representation difference, not a gap.
       for (const h of postmanReq.headers) {
-        if (GLOBAL_HEADERS.has(norm(h.key))) continue;
-        if (!docHeaderNames.has(norm(h.key))) {
-          mismatches.push({
-            type: 'missing_in_doc', field: h.key,
-            source: 'Postman → Doc (header)',
-            detail: `Postman has header "${h.key}" not documented`,
-            severity: 'warning',
-          });
-        }
+        const n = norm(h.key);
+        if (GLOBAL_HEADERS.has(n)) continue;
+        if (docHeaderNames.has(n) || docParamNames.has(n) || tryOutParamNames.has(n)) continue;
+        mismatches.push({
+          type: 'missing_in_doc', field: h.key,
+          source: 'Postman → Doc (header)',
+          detail: `Postman has header "${h.key}" not documented`,
+          severity: 'warning',
+        });
       }
       for (const h of doc.headers) {
-        if (GLOBAL_HEADERS.has(norm(h.name))) continue;
-        if (!postmanHeaderNames.has(norm(h.name))) {
-          mismatches.push({
-            type: 'missing_in_postman', field: h.name,
-            source: 'Doc → Postman (header)',
-            detail: `Doc lists header "${h.name}" not in Postman collection`,
-            severity: 'warning',
-          });
-        }
+        const n = norm(h.name);
+        if (GLOBAL_HEADERS.has(n)) continue;
+        if (postmanHeaderNames.has(n) || postmanAllParamNames.has(n) || pathVarNames.has(n)) continue;
+        mismatches.push({
+          type: 'missing_in_postman', field: h.name,
+          source: 'Doc → Postman (header)',
+          detail: `Doc lists header "${h.name}" not in Postman collection`,
+          severity: 'warning',
+        });
       }
     } else {
       mismatches.push({
@@ -326,9 +336,9 @@ export async function runComparison(): Promise<ComparisonResult[]> {
     });
   }
 
-  // ── Reverse direction: Postman requests missing from the docs ─────────────
-  // Double-check with the reverse fuzzy match before flagging to avoid noise
-  // from name-ordering differences.
+  // ── 5. Reverse direction: Postman requests missing from the docs ──────────
+  // Doc modules with no scrapeable anchors (e.g. Metadata) would flood this
+  // check with noise, so double-check the reverse fuzzy match before flagging.
   for (const pm of postmanRequests) {
     if (matchedPostmanNames.has(pm.name)) continue;
     const docMatch = findByName(pm.name, scraped, s => s.doc.name);
@@ -348,13 +358,13 @@ export async function runComparison(): Promise<ComparisonResult[]> {
     });
   }
 
-  const outPath = path.join(__dirname, '../../reports/comparison-results.json');
+  const outPath = path.join(__dirname, '../../../reports/comparison-results-cma.json');
   fs.writeFileSync(outPath, JSON.stringify(results, null, 2));
 
   const pass = results.filter(r => r.status === 'pass').length;
   const warn = results.filter(r => r.status === 'warning').length;
   const fail = results.filter(r => r.status === 'fail').length;
-  console.log(`\n📊  Comparison done — ✅ ${pass} pass  ⚠️ ${warn} warning  ❌ ${fail} fail`);
+  console.log(`\n📊  CMA Comparison done — ✅ ${pass} pass  ⚠️ ${warn} warning  ❌ ${fail} fail`);
   console.log(`📝  Results → ${outPath}`);
 
   return results;
@@ -362,6 +372,23 @@ export async function runComparison(): Promise<ComparisonResult[]> {
 
 function norm(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Doc param tables append qualifiers like "asset[upload] (mandatory)" — strip them
+// so the name can match Postman/Try Out fields.
+function stripQualifier(name: string): string {
+  return name.replace(/\s*\((mandatory|optional|required)\)\s*$/i, '').trim();
+}
+
+function normParam(name: string): string {
+  return norm(stripQualifier(name));
+}
+
+// "asset[upload]"-style names are multipart form-data BODY fields documented in the
+// params table — they are not query params and never appear as Try Out inputs or
+// Postman query entries, so param-level comparisons must skip them.
+function isBodyField(name: string): boolean {
+  return /\[.+\]/.test(stripQualifier(name));
 }
 
 function sortedWords(name: string): string {
@@ -397,4 +424,4 @@ function extractKeys(raw: string | undefined | null): string[] | undefined {
   return undefined;
 }
 
-runComparison().catch(console.error);
+runComparisonCMA().catch(console.error);

@@ -2,19 +2,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
-import { RunReport, TryOutTestResult, ComparisonResult, ApiTestResult, NewmanResult } from '../../config/types';
+import { RunReport, TryOutTestResult, ComparisonResult, ApiTestResult, NewmanResult } from '../../../config/types';
 
 dotenv.config();
 
 const SLACK_CHANNEL_EMAIL = process.env.SLACK_CHANNEL_EMAIL ?? '';
 const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL ?? '';
 const ALERT_EMAIL_PASSWORD = process.env.ALERT_EMAIL_PASSWORD ?? '';
-const REPORTS_DIR = path.join(__dirname, '../../reports');
+const REPORTS_DIR = path.join(__dirname, '../../../reports');
 
-// --cma flag switches to CMA result files and CMA-labelled output
-const IS_CMA    = process.argv.includes('--cma');
-const API_LABEL = IS_CMA ? 'CMA' : 'CDA';
-const SUFFIX    = IS_CMA ? '-cma' : '';
+// --cma / --analytics flags switch to that API's result files and labelled output
+const IS_CMA       = process.argv.includes('--cma');
+const IS_ANALYTICS = process.argv.includes('--analytics');
+const API_LABEL    = IS_ANALYTICS ? 'Analytics' : IS_CMA ? 'CMA' : 'CDA';
+const SUFFIX       = IS_ANALYTICS ? '-analytics' : IS_CMA ? '-cma' : '';
 
 function loadJson<T>(filename: string, fallback: T): T {
   const p = path.join(REPORTS_DIR, filename);
@@ -210,6 +211,7 @@ function buildHtmlReport(report: RunReport): string {
     .mismatch { padding: 3px 0; font-size: 11px; }
     .mismatch.error { color: #dc2626; }
     .mismatch.warning { color: #d97706; }
+    .mismatch.info { color: #64748b; }
     .badge-ok { background: #dcfce7; color: #166534; border-radius: 4px; padding: 2px 6px; font-weight: 700; }
     .badge-err { background: #fee2e2; color: #991b1b; border-radius: 4px; padding: 2px 6px; font-weight: 700; }
   </style>
@@ -224,13 +226,13 @@ function buildHtmlReport(report: RunReport): string {
     <div class="card"><div class="card-num red">${report.failed}</div><div class="card-label">Failed</div></div>
   </div>
 
-  <h2>Phase 2 — Try Out Panel Results</h2>
+  <h2>Phase 2 — ${IS_ANALYTICS ? 'Doc-Declared Sample Response (no live Try Out "Send" button exists for this API)' : 'Try Out Panel Results'}</h2>
   <table>
     <thead><tr><th>Request</th><th>Method</th><th>Default Code</th><th>Actual Code</th><th>Status</th><th>Flags</th></tr></thead>
     <tbody>${tryOutRows || '<tr><td colspan="6">No Try Out results yet — run npm run tryout</td></tr>'}</tbody>
   </table>
 
-  <h2>Phase 3 — Doc ↔ Try Out ↔ Postman Comparison</h2>
+  <h2>Phase 3 — Doc ↔ ${IS_ANALYTICS ? '' : 'Try Out ↔ '}Postman Comparison</h2>
   <table>
     <thead><tr><th>Request</th><th>Endpoint</th><th>Status</th><th>Mismatches</th></tr></thead>
     <tbody>${compRows || '<tr><td colspan="4">No comparison results yet — run npm run compare</td></tr>'}</tbody>

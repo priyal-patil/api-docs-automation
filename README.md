@@ -25,6 +25,33 @@ npm run api-test     # Phase 4 — direct API functional tests
 npm run report       # Phase 5 — generate HTML report + Slack alert
 ```
 
+## Analytics API
+
+The Analytics API docs have no live "Try Out" Send button (`Open Builder` only
+shows the same static params + a canned Sample Response — confirmed, nothing
+executes). So this pipeline skips the live Try Out phase and uses the doc's
+declared Sample Response as the baseline for the response-body check instead:
+
+```bash
+npm run analytics          # scrape → newman → compare → report, end-to-end
+
+npm run scrape:analytics   # scrape the 8 Analytics doc pages
+npm run newman:analytics   # execute the Analytics Postman collection live
+npm run compare:analytics  # doc params/headers ↔ Postman, + Newman response ↔ doc Sample Response
+npm run report:analytics   # → reports/run-report-analytics.html
+```
+
+Auth is org-scoped (`CS_ORG_UID` + `CS_AUTHTOKEN`, requires an Owner/Admin
+account), not the stack-scoped `CS_MANAGEMENT_TOKEN` used by CMA. Generate an
+authtoken via `POST /v3/user-session` (email + password) — see
+[Authentication](https://www.contentstack.com/docs/developers/apis/analytics-api#authentication).
+
+**Known collection issue:** the official Postman collection hardcodes
+`from=2024-01-31&to=2024-03-31`, which now returns `400 An internal server
+error occurred` (the analytics data window appears to have aged past those
+dates). `runNewmanAnalytics.ts` rewrites both to a rolling last-30-days range
+before every run — the collection itself should probably be fixed upstream.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |
