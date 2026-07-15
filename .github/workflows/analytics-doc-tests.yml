@@ -1,0 +1,83 @@
+name: Contentstack Doc Automation — Analytics Daily Run
+
+on:
+  schedule:
+    - cron: '30 22 * * *'   # 4:00 AM IST (IST = UTC+5:30, so 22:30 UTC the previous day) — same slot as the CDA run
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+  push:
+    branches: [main]
+    paths:
+      - 'src/analytics/**'
+      - 'src/shared/**'
+      - '.env.example'
+
+jobs:
+  run-analytics-automation:
+    runs-on: ubuntu-latest
+    # Analytics has only 8 endpoints and no live Try Out phase — far shorter
+    # than CDA's 180 min, but sized generously until a real run confirms it.
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << EOF
+          CS_ORG_UID=${{ secrets.CS_ORG_UID }}
+          CS_AUTHTOKEN=${{ secrets.CS_AUTHTOKEN }}
+          CS_REGION=${{ secrets.CS_REGION || 'us' }}
+          POSTMAN_API_KEY=${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_ANALYTICS_COLLECTION_ID=${{ secrets.POSTMAN_ANALYTICS_COLLECTION_ID }}
+          SLACK_CHANNEL_EMAIL=${{ secrets.SLACK_CHANNEL_EMAIL }}
+          ALERT_FROM_EMAIL=${{ secrets.ALERT_FROM_EMAIL }}
+          ALERT_EMAIL_PASSWORD=${{ secrets.ALERT_EMAIL_PASSWORD }}
+          ANALYTICS_DOC_URL=https://www.contentstack.com/docs/developers/apis/analytics-api
+          EOF
+
+      - name: Phase 1 — Scrape Analytics documentation
+        run: npm run scrape:analytics
+        continue-on-error: true   # don't stop pipeline if scraping partially fails
+
+      - name: Phase 2 — Newman (run Analytics Postman collection live)
+        run: npm run newman:analytics
+        continue-on-error: true
+
+      - name: Phase 3 — Doc ↔ Postman comparison (+ response body vs doc Sample Response)
+        run: npm run compare:analytics
+        continue-on-error: true
+
+      - name: Phase 4 — Generate report + send Slack alert
+        run: npm run report:analytics
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analytics-doc-automation-report-${{ github.run_number }}
+          path: reports/run-report-analytics.*
+          retention-days: 30
+
+      - name: Fail job if critical failures
+        run: |
+          node -e "
+            const r = require('./reports/run-report-analytics.json');
+            if (r.failed > 0) {
+              console.error('❌ ' + r.failed + ' failure(s) detected');
+              process.exit(1);
+            }
+            console.log('✅ All checks passed');
+          "
