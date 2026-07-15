@@ -1,0 +1,104 @@
+name: Contentstack Doc Automation — Daily Run
+
+on:
+  schedule:
+    - cron: '30 22 * * *'   # 4:00 AM IST (IST = UTC+5:30, so 22:30 UTC the previous day)
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '.env.example'
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    # The Try Out phase alone took ~2.4 hours in a real run (single worker,
+    # 90 requests) — 30 min would kill the job long before it finishes.
+    # Playwright now runs with 3 workers (see playwright.config.ts) which
+    # should cut this down, but sized generously until a full run confirms
+    # the real wall-clock time on a GitHub-hosted runner.
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << EOF
+          CS_API_KEY=${{ secrets.CS_API_KEY }}
+          CS_DELIVERY_TOKEN=${{ secrets.CS_DELIVERY_TOKEN }}
+          CS_MANAGEMENT_TOKEN=${{ secrets.CS_MANAGEMENT_TOKEN }}
+          CS_ACCESS_TOKEN=${{ secrets.CS_ACCESS_TOKEN }}
+          CS_REGION=${{ secrets.CS_REGION || 'us' }}
+          POSTMAN_API_KEY=${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_CDA_COLLECTION_ID=${{ secrets.POSTMAN_CDA_COLLECTION_ID }}
+          SLACK_CHANNEL_EMAIL=${{ secrets.SLACK_CHANNEL_EMAIL }}
+          ALERT_FROM_EMAIL=${{ secrets.ALERT_FROM_EMAIL }}
+          ALERT_EMAIL_PASSWORD=${{ secrets.ALERT_EMAIL_PASSWORD }}
+          CDA_DOC_URL=https://www.contentstack.com/docs/developers/apis/content-delivery-api
+          EOF
+
+      - name: Phase 1 — Scrape documentation
+        run: npm run scrape
+        continue-on-error: true   # don't stop pipeline if scraping partially fails
+
+      - name: Phase 2 — Live Try Out tests
+        run: npm run tryout
+        continue-on-error: true
+
+      - name: Phase 3a — Newman (run Postman collection requests)
+        run: npm run newman
+        continue-on-error: true
+
+      - name: Phase 3b — Postman comparison (params + request/response body)
+        run: npm run compare
+        continue-on-error: true
+
+      - name: Phase 4 — Direct API tests
+        run: npm run api-test
+        continue-on-error: true
+
+      - name: Phase 5 — Generate report + send Slack alert
+        run: npm run report
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: doc-automation-report-${{ github.run_number }}
+          path: reports/
+          retention-days: 30
+
+      - name: Upload Playwright traces
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-results-${{ github.run_number }}
+          path: reports/playwright/
+          retention-days: 7
+
+      - name: Fail job if critical failures
+        run: |
+          node -e "
+            const r = require('./reports/run-report.json');
+            if (r.failed > 0) {
+              console.error('❌ ' + r.failed + ' failure(s) detected');
+              process.exit(1);
+            }
+            console.log('✅ All checks passed');
+          "

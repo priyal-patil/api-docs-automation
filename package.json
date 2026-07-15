@@ -1,0 +1,38 @@
+{
+  "name": "api-docs-automation",
+  "version": "1.0.0",
+  "description": "Automated testing for Contentstack API documentation — scraping, Try Out validation, Postman comparison, and direct API tests",
+  "scripts": {
+    "scrape": "ts-node src/scraper/scrapeAll.ts",
+    "tryout": "playwright test tests/tryout.spec.ts --reporter=html",
+    "newman": "ts-node src/postman/runNewman.ts",
+    "compare": "ts-node src/postman/compare.ts",
+    "api-test": "vitest run tests/api/",
+    "report": "ts-node src/reporter/generateReport.ts",
+    "run-all": "npm run scrape && npm run tryout && npm run newman && npm run compare && npm run api-test && npm run report",
+
+    "scrape:cma": "ts-node src/scraper/scrapeAllCMA.ts",
+    "tryout:cma": "playwright test tests/tryout-cma.spec.ts --reporter=html",
+    "newman:cma": "ts-node src/postman/runNewmanCMA.ts",
+    "compare:cma": "ts-node src/postman/compareCMA.ts",
+    "report:cma": "ts-node src/reporter/generateReport.ts --cma",
+    "cma": "npm run scrape:cma && npm run tryout:cma && npm run newman:cma && npm run compare:cma && npm run report:cma",
+
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "newman": "^6.1.3",
+    "nodemailer": "^9.0.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.45.0",
+    "@types/newman": "^5.3.6",
+    "@types/node": "^20.14.0",
+    "@types/nodemailer": "^8.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

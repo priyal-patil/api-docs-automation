@@ -1,0 +1,17 @@
+node_modules/
+
+# Secrets — never commit real credentials
+.env
+.env.local
+
+# Generated reports and test artifacts
+reports/
+playwright-report/
+test-results/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# OS/editor cruft
+.DS_Store
