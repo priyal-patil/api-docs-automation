@@ -34,14 +34,21 @@ export async function generateReport(): Promise<void> {
   const totalRequests = comparisonResults.length || tryOutResults.length || apiTestResults.length;
   const passed  = comparisonResults.filter(r => r.status === 'pass').length;
   const warnings = comparisonResults.filter(r => r.status === 'warning').length;
-  // NOTE: newmanResults is intentionally NOT added here. Every real Newman
-  // failure already gets folded into comparisonResults as a 'newman_failure'
-  // mismatch that flips that request's status to 'fail' (see compare*.ts) —
-  // adding newmanResults.filter(!passed) again double-counted the exact same
-  // failures a second time (8 real failures were reported as 16).
-  const failed  = comparisonResults.filter(r => r.status === 'fail').length
-    + tryOutResults.filter(r => !r.passed).length
-    + apiTestResults.filter(r => !r.passed).length;
+  // A single failing request commonly shows up in MULTIPLE result arrays —
+  // e.g. a Newman failure also flips its comparisonResults status to 'fail'
+  // (confirmed: for one CDA run, comparisonResults' 7 fails were a full
+  // subset of newmanResults' 17). Naively summing arrays double/triple-counts
+  // those. But newmanResults can ALSO contain failures with NO doc match at
+  // all (confirmed: 10 "Queries" module failures never reached
+  // comparisonResults because findByName had nothing to match), so simply
+  // dropping one array undercounts instead. Dedupe by request name across
+  // every source so each failing request is counted exactly once.
+  const failedNames = new Set<string>();
+  comparisonResults.filter(r => r.status === 'fail').forEach(r => failedNames.add(r.requestName));
+  tryOutResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
+  apiTestResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
+  newmanResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
+  const failed = failedNames.size;
 
   const report: RunReport = {
     runAt: new Date().toISOString(),
