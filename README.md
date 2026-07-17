@@ -140,6 +140,41 @@ npm run report:brandkit   # → reports/run-report-brandkit.html
 Sample Response is documented with a singular `voice_profile` key; the live
 API actually returns the plural `voice_profiles`.
 
+## Generative AI API
+
+Only one endpoint (`GenAI`), and unlike every other module here, **it calls a
+real LLM** — the response is a streamed, non-JSON body (`"data: {...}"` SSE
+chunks, `gpt-4o` in this org), not a plain JSON object, so response-body
+comparison is skipped wherever keys aren't parseable (the same fallback
+already used elsewhere when a field is unavailable). It's a sub-resource of
+Brand Kit — the base URL bakes in `/brand-kits`, and it needs a real
+`brand_kit_uid`, so the runner reuses Brand Kit's disposable create/delete
+lifecycle.
+
+```bash
+npm run genai          # scrape → newman → compare → report, end-to-end
+
+npm run scrape:genai   # scrape the single GenAI endpoint
+npm run newman:genai   # create a disposable test Brand Kit, call the real LLM once, delete it
+npm run compare:genai  # doc params/headers/request body ↔ Postman
+npm run report:genai   # → reports/run-report-genai.html
+```
+
+**Doc bugs found (confirmed live, not guessed):**
+- The intro page's "API Conventions" section says *"Generative AI API
+  supports GET verbs or methods"* — the real (and only) endpoint is `POST`.
+- `brand_kit_uid` is documented as optional; the live API 400s with
+  `"brand_kit_uid is required"` without it. Flagged in every comparison run
+  (Postman collections don't carry a required/optional flag on headers, so
+  this can't be caught by the normal doc↔Postman diff — hardcoded as a known
+  check in `compareGenAI.ts`).
+
+**Known validation quirk (worked around):** the collection's example body
+hardcodes a masked placeholder `voice_profile_uid` that 400s ("is invalid").
+Our disposable brand kit has no real voice profile to reference, so the
+runner sets `knowledge_vault: false` and drops the field — confirmed live
+this succeeds.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |

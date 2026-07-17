@@ -36,6 +36,12 @@
     "report:brandkit": "ts-node src/shared/reporter/generateReport.ts --brandkit",
     "brandkit": "npm run scrape:brandkit && npm run newman:brandkit && npm run compare:brandkit && npm run report:brandkit",
 
+    "scrape:genai": "ts-node src/genai/scraper/scrapeAllGenAI.ts",
+    "newman:genai": "ts-node src/genai/postman/runNewmanGenAI.ts",
+    "compare:genai": "ts-node src/genai/postman/compareGenAI.ts",
+    "report:genai": "ts-node src/shared/reporter/generateReport.ts --genai",
+    "genai": "npm run scrape:genai && npm run newman:genai && npm run compare:genai && npm run report:genai",
+
     "test": "playwright test"
   },
   "dependencies": {

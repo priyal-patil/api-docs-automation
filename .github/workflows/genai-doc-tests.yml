@@ -1,0 +1,86 @@
+name: Contentstack Doc Automation — Generative AI Daily Run
+
+on:
+  schedule:
+    - cron: '30 22 * * *'   # 4:00 AM IST (IST = UTC+5:30, so 22:30 UTC the previous day) — same slot as the other daily runs
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+  push:
+    branches: [main]
+    paths:
+      - 'src/genai/**'
+      - 'src/shared/**'
+      - '.env.example'
+
+jobs:
+  run-genai-automation:
+    runs-on: ubuntu-latest
+    # 1 endpoint, no live Try Out phase — short, but generous until a real run confirms it.
+    # Note: this run calls a real LLM once per day (confirmed live, gpt-4o) — a deliberate
+    # cost tradeoff to keep this API's doc verification on the same daily cadence as the rest.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << EOF
+          CS_ORG_UID=${{ secrets.CS_ORG_UID }}
+          CS_QA_EMAIL=${{ secrets.CS_QA_EMAIL }}
+          CS_QA_PASSWORD=${{ secrets.CS_QA_PASSWORD }}
+          CS_AUTHTOKEN=${{ secrets.CS_AUTHTOKEN }}
+          CS_REGION=${{ secrets.CS_REGION || 'us' }}
+          POSTMAN_API_KEY=${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_GENAI_COLLECTION_ID=${{ secrets.POSTMAN_GENAI_COLLECTION_ID }}
+          SLACK_CHANNEL_EMAIL=${{ secrets.SLACK_CHANNEL_EMAIL }}
+          ALERT_FROM_EMAIL=${{ secrets.ALERT_FROM_EMAIL }}
+          ALERT_EMAIL_PASSWORD=${{ secrets.ALERT_EMAIL_PASSWORD }}
+          GENAI_DOC_URL=https://www.contentstack.com/docs/developers/apis/generative-ai-api
+          EOF
+
+      - name: Phase 1 — Scrape Generative AI API documentation
+        run: npm run scrape:genai
+        continue-on-error: true   # don't stop pipeline if scraping partially fails
+
+      - name: Phase 2 — Newman (creates a disposable test Brand Kit, calls the real LLM once, deletes it)
+        run: npm run newman:genai
+        continue-on-error: true
+
+      - name: Phase 3 — Doc ↔ Postman comparison (+ request body vs doc Sample Request)
+        run: npm run compare:genai
+        continue-on-error: true
+
+      - name: Phase 4 — Generate report + send Slack report
+        run: npm run report:genai
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: genai-doc-automation-report-${{ github.run_number }}
+          path: reports/run-report-genai.*
+          retention-days: 30
+
+      - name: Fail job if critical failures
+        run: |
+          node -e "
+            const r = require('./reports/run-report-genai.json');
+            if (r.failed > 0) {
+              console.error('❌ ' + r.failed + ' failure(s) detected');
+              process.exit(1);
+            }
+            console.log('✅ All checks passed');
+          "

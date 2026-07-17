@@ -13,12 +13,13 @@ const REPORTS_DIR = path.join(__dirname, '../../../reports');
 
 // Each flag switches to that API's result files and labelled output.
 // noLiveTryOut: true for APIs whose docs have no Try Out "Send" button
-// (Analytics, Automations, Brand Kit) — CDA/CMA have live Try Out execution.
+// (Analytics, Automations, Brand Kit, GenAI) — CDA/CMA have live Try Out execution.
 const API_FLAGS: Array<{ flag: string; label: string; suffix: string; noLiveTryOut?: boolean }> = [
   { flag: '--cma',         label: 'CMA',         suffix: '-cma' },
   { flag: '--analytics',   label: 'Analytics',   suffix: '-analytics',   noLiveTryOut: true },
   { flag: '--automations', label: 'Automations', suffix: '-automations', noLiveTryOut: true },
   { flag: '--brandkit',    label: 'Brand Kit',   suffix: '-brandkit',    noLiveTryOut: true },
+  { flag: '--genai',       label: 'Generative AI', suffix: '-genai',     noLiveTryOut: true },
 ];
 const activeApi     = API_FLAGS.find(a => process.argv.includes(a.flag));
 const API_LABEL     = activeApi?.label ?? 'CDA';
