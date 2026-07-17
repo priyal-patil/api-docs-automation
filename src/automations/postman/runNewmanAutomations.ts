@@ -94,6 +94,8 @@ async function createTestProjectVariable(headers: Record<string, string>, projec
 async function findPopulatedProjectData(headers: Record<string, string>): Promise<{
   projectUid?: string; automationUid?: string; executionUid?: string; auditlogUid?: string; accountUid?: string;
 }> {
+  let fallback: { projectUid: string; automationUid: string } | undefined;
+
   try {
     const res = await axios.get(`${BASE}/projects`, { headers, params: { limit: 20 } });
     const projects: any[] = res.data?.projects ?? [];
@@ -101,13 +103,23 @@ async function findPopulatedProjectData(headers: Record<string, string>): Promis
       const pid = p.id ?? p.uid;
       if (!pid) continue;
       try {
-        const autoRes = await axios.get(`${BASE}/projects/${pid}/automations`, { headers });
+        // show_steps=true so we can tell a properly-configured automation
+        // (has a workflow) from an empty shell. Confirmed live: "Activate/
+        // Deactivate" 400s with "Trigger is not defined" against an
+        // automation with an empty steps array, but succeeds (200) against
+        // one with real steps — so prefer those over just the first found.
+        const autoRes = await axios.get(`${BASE}/projects/${pid}/automations`, { headers, params: { show_steps: true } });
         // Confirmed live and in the docs: the response key is "rules", not "automations".
         const automations: any[] = autoRes.data?.rules ?? [];
         if (!automations.length) continue;
 
-        const automationUid = automations[0].id ?? automations[0].uid;
-        console.log(`   ✅  Found populated project ${pid} with automation ${automationUid}`);
+        if (!fallback) fallback = { projectUid: pid, automationUid: automations[0].id ?? automations[0].uid };
+
+        const configured = automations.find(a => Array.isArray(a.steps) && a.steps.length > 0);
+        if (!configured) continue; // keep looking for a project with a properly-configured automation
+
+        const automationUid = configured.id ?? configured.uid;
+        console.log(`   ✅  Found populated project ${pid} with configured automation ${automationUid}`);
 
         let executionUid: string | undefined;
         let auditlogUid: string | undefined;
@@ -129,6 +141,11 @@ async function findPopulatedProjectData(headers: Record<string, string>): Promis
       } catch { /* this project has no accessible automations — try the next */ }
     }
   } catch { console.warn('   ⚠️  Could not list projects to find existing automation data'); }
+
+  if (fallback) {
+    console.warn(`   ⚠️  No automation with a configured workflow found anywhere — falling back to ${fallback.automationUid} (Activate/Deactivate will likely 400 "Trigger is not defined")`);
+    return fallback;
+  }
   console.warn('   ⚠️  No existing project with automations found — those requests will be marked as no-test-data');
   return {};
 }
@@ -212,6 +229,24 @@ function moveFolderLast(items: any[], folderName: string): any[] {
   return items;
 }
 
+/**
+ * The collection's own "Update a project variable" body hardcodes
+ * key: "Key3" — confirmed live, this 403s with "Project Variable with same
+ * key already exist" (key uniqueness appears to not be scoped per-project).
+ * Override it to keep the SAME key our own createTestProjectVariable() used,
+ * which is a real update (changing only the value) rather than a rename,
+ * sidestepping the collision entirely.
+ */
+function fixUpdateVariableBody(items: any[]): void {
+  for (const item of items) {
+    if (item.item) { fixUpdateVariableBody(item.item); continue; }
+    if (item.name !== 'Update a project variable') continue;
+    if (item.request?.body?.mode === 'raw') {
+      item.request.body.raw = JSON.stringify({ key: 'AUTOMATIONTESTVAR', type: 'text', value: 'updated-test-value' });
+    }
+  }
+}
+
 function hasUnresolvedVariable(url: string): boolean {
   return url.includes('%7B%7B') || url.includes('{{');
 }
@@ -258,6 +293,7 @@ export async function runNewmanAutomations(): Promise<NewmanResult[]> {
       populated
     );
     collection.item = moveFolderLast(collection.item ?? [], 'Projects');
+    fixUpdateVariableBody(collection.item ?? []);
 
     console.log('\n🏃  Running Newman against Automations Postman collection...');
 
