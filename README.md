@@ -41,10 +41,16 @@ npm run compare:analytics  # doc params/headers ↔ Postman, + Newman response �
 npm run report:analytics   # → reports/run-report-analytics.html
 ```
 
-Auth is org-scoped (`CS_ORG_UID` + `CS_AUTHTOKEN`, requires an Owner/Admin
-account), not the stack-scoped `CS_MANAGEMENT_TOKEN` used by CMA. Generate an
-authtoken via `POST /v3/user-session` (email + password) — see
+Auth is org-scoped (`CS_ORG_UID`, requires an Owner/Admin account), not the
+stack-scoped `CS_MANAGEMENT_TOKEN` used by CMA. Set `CS_QA_EMAIL` +
+`CS_QA_PASSWORD` and `runNewmanAnalytics.ts` logs in fresh every run via
+`POST /v3/user-session` — see
 [Authentication](https://www.contentstack.com/docs/developers/apis/analytics-api#authentication).
+This is deliberate, not optional polish: authtokens silently expire (a user is
+capped at 20 valid tokens; a login anywhere else quietly evicts the oldest),
+confirmed live when a static `CS_AUTHTOKEN` started 401ing on every request
+after a few days on this shared QA org. `CS_AUTHTOKEN` still works as a
+fallback if no QA credentials are set, but expect it to eventually go stale.
 
 **Known collection issue:** the official Postman collection hardcodes
 `from=2024-01-31&to=2024-03-31`, which now returns `400 An internal server

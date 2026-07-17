@@ -34,10 +34,14 @@ export async function generateReport(): Promise<void> {
   const totalRequests = comparisonResults.length || tryOutResults.length || apiTestResults.length;
   const passed  = comparisonResults.filter(r => r.status === 'pass').length;
   const warnings = comparisonResults.filter(r => r.status === 'warning').length;
+  // NOTE: newmanResults is intentionally NOT added here. Every real Newman
+  // failure already gets folded into comparisonResults as a 'newman_failure'
+  // mismatch that flips that request's status to 'fail' (see compare*.ts) —
+  // adding newmanResults.filter(!passed) again double-counted the exact same
+  // failures a second time (8 real failures were reported as 16).
   const failed  = comparisonResults.filter(r => r.status === 'fail').length
     + tryOutResults.filter(r => !r.passed).length
-    + apiTestResults.filter(r => !r.passed).length
-    + newmanResults.filter(r => !r.passed).length;
+    + apiTestResults.filter(r => !r.passed).length;
 
   const report: RunReport = {
     runAt: new Date().toISOString(),
@@ -60,25 +64,69 @@ export async function generateReport(): Promise<void> {
   fs.writeFileSync(htmlPath, html);
   console.log(`\n📊  HTML report → ${htmlPath}`);
 
-  // ── Send Slack alert if there are failures ─────────────────────────────────
-  if (failed > 0 && SLACK_CHANNEL_EMAIL && ALERT_FROM_EMAIL) {
-    await sendSlackEmailAlert(report);
-  } else if (failed > 0) {
-    console.warn('⚠️  Failures found but SLACK_CHANNEL_EMAIL or ALERT_FROM_EMAIL not set — skipping alert');
+  // ── Send Slack status message every run — pass or fail ─────────────────────
+  writeGithubStepSummary(report);
+  if (SLACK_CHANNEL_EMAIL && ALERT_FROM_EMAIL) {
+    await sendSlackEmailReport(report);
   } else {
-    console.log('✅  All green — no alert sent');
+    console.warn('⚠️  SLACK_CHANNEL_EMAIL or ALERT_FROM_EMAIL not set — skipping Slack report');
   }
 }
 
-async function sendSlackEmailAlert(report: RunReport): Promise<void> {
+/**
+ * Writes the report straight into the GitHub Actions run summary page (visible
+ * without downloading the artifact) — a no-op outside GHA, since
+ * GITHUB_STEP_SUMMARY is only set on Actions runners.
+ */
+function writeGithubStepSummary(report: RunReport): void {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return;
+
+  const statusEmoji = report.failed > 0 ? '🚨' : report.warnings > 0 ? '⚠️' : '✅';
+  const lines = [
+    `## ${statusEmoji} Contentstack ${API_LABEL} Doc Automation`,
+    '',
+    `Run at: ${new Date(report.runAt).toLocaleString()}`,
+    '',
+    `| Total | ✅ Pass | ⚠️ Warn | ❌ Fail |`,
+    `|---|---|---|---|`,
+    `| ${report.totalRequests} | ${report.passed} | ${report.warnings} | ${report.failed} |`,
+    '',
+  ];
+
+  const failedComparisons = report.comparisonResults.filter(r => r.status === 'fail');
+  if (failedComparisons.length > 0) {
+    lines.push('### ❌ Failing requests', '');
+    for (const r of failedComparisons.slice(0, 20)) {
+      const top = r.mismatches.filter(m => m.severity === 'error').slice(0, 2).map(m => m.detail).join('; ');
+      lines.push(`- **${r.requestName}** — ${top}`);
+    }
+    if (failedComparisons.length > 20) lines.push(`- … and ${failedComparisons.length - 20} more`);
+    lines.push('');
+  }
+
+  lines.push(`Full HTML report is attached as a workflow artifact.`);
+
+  fs.appendFileSync(summaryPath, lines.join('\n') + '\n');
+  console.log('📝  Wrote report to GitHub Actions job summary');
+}
+
+async function sendSlackEmailReport(report: RunReport): Promise<void> {
   const failedTryOuts     = report.tryOutResults.filter(r => !r.passed);
   const failedComparisons = report.comparisonResults.filter(r => r.status === 'fail');
   const failedApiTests    = report.apiTestResults.filter(r => !r.passed);
   const failedNewman      = report.newmanResults.filter(r => !r.passed);
 
+  const statusEmoji = report.failed > 0 ? '🚨' : report.warnings > 0 ? '⚠️' : '✅';
+  const statusLine = report.failed > 0
+    ? `${report.failed} failure(s) detected`
+    : report.warnings > 0
+    ? `passed with ${report.warnings} warning(s)`
+    : 'all checks passed';
+
   // Plain text body (shows in Slack as a message)
   const lines: string[] = [
-    `🚨 Contentstack ${API_LABEL} Doc Automation — ${report.failed} failure(s) detected`,
+    `${statusEmoji} Contentstack ${API_LABEL} Doc Automation — ${statusLine}`,
     `Run at: ${new Date(report.runAt).toLocaleString()}`,
     `Total: ${report.totalRequests} requests | ✅ ${report.passed} pass | ⚠️ ${report.warnings} warn | ❌ ${report.failed} fail`,
     `Full report: reports/run-report${SUFFIX}.html`,
@@ -121,6 +169,10 @@ async function sendSlackEmailAlert(report: RunReport): Promise<void> {
     if (failedApiTests.length > 5) lines.push(`  … and ${failedApiTests.length - 5} more`);
   }
 
+  if (report.failed === 0 && report.warnings === 0) {
+    lines.push('No issues found — all requests passed.');
+  }
+
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -133,12 +185,12 @@ async function sendSlackEmailAlert(report: RunReport): Promise<void> {
     await transporter.sendMail({
       from: ALERT_FROM_EMAIL,
       to: SLACK_CHANNEL_EMAIL,
-      subject: `🚨 ${API_LABEL} Doc Automation: ${report.failed} failure(s) — ${new Date(report.runAt).toLocaleDateString()}`,
+      subject: `${statusEmoji} ${API_LABEL} Doc Automation: ${statusLine} — ${new Date(report.runAt).toLocaleDateString()}`,
       text: lines.join('\n'),
     });
-    console.log('📣  Slack channel alert sent via email');
+    console.log('📣  Slack channel report sent via email');
   } catch (err) {
-    console.error('❌  Failed to send email alert:', (err as Error).message);
+    console.error('❌  Failed to send email report:', (err as Error).message);
   }
 }
 

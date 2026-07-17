@@ -10,7 +10,9 @@ dotenv.config();
 const POSTMAN_API_KEY                 = process.env.POSTMAN_API_KEY ?? '';
 const POSTMAN_ANALYTICS_COLLECTION_ID = process.env.POSTMAN_ANALYTICS_COLLECTION_ID ?? '';
 const ORG_UID                         = process.env.CS_ORG_UID ?? '';
-const AUTHTOKEN                       = process.env.CS_AUTHTOKEN ?? '';
+const CS_QA_EMAIL                     = process.env.CS_QA_EMAIL ?? '';
+const CS_QA_PASSWORD                  = process.env.CS_QA_PASSWORD ?? '';
+const STATIC_AUTHTOKEN                = process.env.CS_AUTHTOKEN ?? '';
 
 // Base URL differs per region — see https://www.contentstack.com/docs/developers/apis/analytics-api#base-url
 const REGION_HOSTS: Record<string, string> = {
@@ -25,18 +27,43 @@ const REGION_HOSTS: Record<string, string> = {
 const BASE_HOST = REGION_HOSTS[process.env.CS_REGION ?? 'us'] ?? 'app.contentstack.com';
 const BASE = `https://${BASE_HOST}/analytics/v2`;
 
-const HEADERS = { authtoken: AUTHTOKEN };
+/**
+ * Authtokens silently go stale — Contentstack caps a user at 20 valid
+ * authtokens; creating a new one (elsewhere, by anyone) expires the oldest
+ * without warning. A shared QA org with other automation/logins makes this
+ * a recurring failure, not a one-off — confirmed live (GHA run 2026-07-16
+ * got 401 on all 8 requests). So prefer a fresh login every run, same
+ * "live data over static value" approach already used everywhere else in
+ * this project (fetchLiveUids, live jobId, etc). Falls back to a static
+ * CS_AUTHTOKEN only if no QA credentials are configured.
+ */
+async function resolveAuthtoken(): Promise<string> {
+  if (CS_QA_EMAIL && CS_QA_PASSWORD) {
+    const res = await axios.post('https://api.contentstack.io/v3/user-session', {
+      user: { email: CS_QA_EMAIL, password: CS_QA_PASSWORD },
+    });
+    const token = res.data?.user?.authtoken;
+    if (!token) throw new Error('Login succeeded but no authtoken was returned');
+    console.log('   ✅  Fetched a fresh authtoken via login');
+    return token;
+  }
+  if (STATIC_AUTHTOKEN) {
+    console.warn('   ⚠️  CS_QA_EMAIL/CS_QA_PASSWORD not set — using static CS_AUTHTOKEN (can silently go stale)');
+    return STATIC_AUTHTOKEN;
+  }
+  throw new Error('Set either CS_QA_EMAIL + CS_QA_PASSWORD, or CS_AUTHTOKEN, in .env');
+}
 
 /**
  * Retrieve Data needs a real jobId, which only exists after calling one of the
  * "create job" endpoints — same live-fetch-before-Newman pattern used for CDA/CMA
  * (fetchLiveUids), since Postman has no test script wiring jobId automatically.
  */
-async function fetchLiveJobId(): Promise<string | undefined> {
+async function fetchLiveJobId(authtoken: string): Promise<string | undefined> {
   try {
     const to = new Date().toISOString().slice(0, 10);
     const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const res = await axios.get(`${BASE}/subscription`, { headers: HEADERS, params: { orgUid: ORG_UID, from, to } });
+    const res = await axios.get(`${BASE}/subscription`, { headers: { authtoken }, params: { orgUid: ORG_UID, from, to } });
     if (res.data?.jobId) {
       console.log(`   ✅  jobId = ${res.data.jobId}`);
       return res.data.jobId;
@@ -45,10 +72,10 @@ async function fetchLiveJobId(): Promise<string | undefined> {
   return undefined;
 }
 
-function buildEnvironment(jobId?: string): object {
+function buildEnvironment(authtoken: string, jobId?: string): object {
   const values = [
     { key: 'orgUid',    value: ORG_UID,   enabled: true },
-    { key: 'authtoken', value: AUTHTOKEN, enabled: true },
+    { key: 'authtoken', value: authtoken, enabled: true },
     { key: 'base_url',  value: BASE_HOST, enabled: true },
     { key: 'jobId',     value: jobId ?? '', enabled: true },
   ];
@@ -101,12 +128,15 @@ export async function runNewmanAnalytics(): Promise<NewmanResult[]> {
   if (!POSTMAN_API_KEY || !POSTMAN_ANALYTICS_COLLECTION_ID) {
     throw new Error('POSTMAN_API_KEY and POSTMAN_ANALYTICS_COLLECTION_ID must be set in .env');
   }
-  if (!ORG_UID || !AUTHTOKEN) {
-    throw new Error('CS_ORG_UID and CS_AUTHTOKEN must be set in .env (Analytics API uses org-scoped auth, not the CMA management token)');
+  if (!ORG_UID) {
+    throw new Error('CS_ORG_UID must be set in .env (Analytics API uses org-scoped auth, not the CMA management token)');
   }
 
+  console.log('\n🔑  Resolving authtoken...');
+  const authtoken = await resolveAuthtoken();
+
   console.log('\n🔍  Pre-fetching a live jobId for Newman environment...');
-  const jobId = await fetchLiveJobId();
+  const jobId = await fetchLiveJobId(authtoken);
 
   console.log('\n📥  Fetching Analytics Postman collection and fixing disabled headers...');
   const rawResp = await axios.get(
@@ -128,7 +158,7 @@ export async function runNewmanAnalytics(): Promise<NewmanResult[]> {
     newman.run(
       {
         collection,
-        environment: buildEnvironment(jobId) as any,
+        environment: buildEnvironment(authtoken, jobId) as any,
         reporters: ['cli'],
         insecure: false,
         timeoutRequest: 15_000,

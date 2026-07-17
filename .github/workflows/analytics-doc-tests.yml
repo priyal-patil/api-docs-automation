@@ -38,6 +38,8 @@ jobs:
         run: |
           cat > .env << EOF
           CS_ORG_UID=${{ secrets.CS_ORG_UID }}
+          CS_QA_EMAIL=${{ secrets.CS_QA_EMAIL }}
+          CS_QA_PASSWORD=${{ secrets.CS_QA_PASSWORD }}
           CS_AUTHTOKEN=${{ secrets.CS_AUTHTOKEN }}
           CS_REGION=${{ secrets.CS_REGION || 'us' }}
           POSTMAN_API_KEY=${{ secrets.POSTMAN_API_KEY }}
