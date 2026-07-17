@@ -42,6 +42,12 @@
     "report:genai": "ts-node src/shared/reporter/generateReport.ts --genai",
     "genai": "npm run scrape:genai && npm run newman:genai && npm run compare:genai && npm run report:genai",
 
+    "scrape:knowledgevault": "ts-node src/knowledgevault/scraper/scrapeAllKnowledgeVault.ts",
+    "newman:knowledgevault": "ts-node src/knowledgevault/postman/runNewmanKnowledgeVault.ts",
+    "compare:knowledgevault": "ts-node src/knowledgevault/postman/compareKnowledgeVault.ts",
+    "report:knowledgevault": "ts-node src/shared/reporter/generateReport.ts --knowledgevault",
+    "knowledgevault": "npm run scrape:knowledgevault && npm run newman:knowledgevault && npm run compare:knowledgevault && npm run report:knowledgevault",
+
     "test": "playwright test"
   },
   "dependencies": {

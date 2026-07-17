@@ -175,6 +175,46 @@ Our disposable brand kit has no real voice profile to reference, so the
 runner sets `knowledge_vault: false` and drops the field — confirmed live
 this succeeds.
 
+## Knowledge Vault API
+
+Same no-live-Try-Out shape, same Brand Kit sub-resource dependency as GenAI
+(base URL bakes in `/brand-kits`, needs a real `brand_kit_uid`). Only three
+endpoints exist — **Ingest, Update, Delete Content Item — there is no
+Get/List endpoint**, despite the overview text mentioning "usage tracking."
+Ingestion returns a `content.uid` immediately and Update/Delete work against
+it right away — no async wait needed, despite the response saying "will be
+ingested shortly."
+
+```bash
+npm run knowledgevault          # scrape → newman → compare → report, end-to-end
+
+npm run scrape:knowledgevault   # scrape all 3 endpoints
+npm run newman:knowledgevault   # create a disposable test Brand Kit + content item, run the collection live, delete them
+npm run compare:knowledgevault  # doc params/headers/request body ↔ Postman, + Newman response ↔ doc Sample Response
+npm run report:knowledgevault   # → reports/run-report-knowledgevault.html
+```
+
+**Test data lifecycle:** unlike Automations, deleting the disposable Brand
+Kit cascades all Knowledge Vault content stored under it — no separate
+cleanup call needed for ingested items (including the one the collection's
+own "Ingest Content Item" request creates as a side effect of running it).
+The collection has no test script to chain Ingest's `content_uid` into
+Update/Delete, so the runner pre-fetches its own via a live Ingest call
+first (same pattern as Analytics' `jobId`).
+
+**Doc + collection bug found (confirmed live, not guessed):** `Update
+Content Item`'s example request body is **invalid JSON in both the doc's
+own rendered Sample Request and the Postman collection** — missing a comma
+between `"content"` and `"_metadata"`, likely generated from the same
+broken source. Neither reference a developer might copy from actually
+works. `runNewmanKnowledgeVault.ts` sends an equivalent valid body instead
+so Update itself gets tested; `compareKnowledgeVault.ts` flags the broken
+example as a failure (not just a warning) since neither source is usable as-is.
+
+**Doc bug found (confirmed live, not guessed):** `path` is documented as
+required on `Ingest Content Item`, but the live API accepts omitting it and
+auto-assigns a default folder.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |
