@@ -24,6 +24,12 @@
     "report:analytics": "ts-node src/shared/reporter/generateReport.ts --analytics",
     "analytics": "npm run scrape:analytics && npm run newman:analytics && npm run compare:analytics && npm run report:analytics",
 
+    "scrape:automations": "ts-node src/automations/scraper/scrapeAllAutomations.ts",
+    "newman:automations": "ts-node src/automations/postman/runNewmanAutomations.ts",
+    "compare:automations": "ts-node src/automations/postman/compareAutomations.ts",
+    "report:automations": "ts-node src/shared/reporter/generateReport.ts --automations",
+    "automations": "npm run scrape:automations && npm run newman:automations && npm run compare:automations && npm run report:automations",
+
     "test": "playwright test"
   },
   "dependencies": {

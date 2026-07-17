@@ -11,11 +11,12 @@ const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL ?? '';
 const ALERT_EMAIL_PASSWORD = process.env.ALERT_EMAIL_PASSWORD ?? '';
 const REPORTS_DIR = path.join(__dirname, '../../../reports');
 
-// --cma / --analytics flags switch to that API's result files and labelled output
-const IS_CMA       = process.argv.includes('--cma');
-const IS_ANALYTICS = process.argv.includes('--analytics');
-const API_LABEL    = IS_ANALYTICS ? 'Analytics' : IS_CMA ? 'CMA' : 'CDA';
-const SUFFIX       = IS_ANALYTICS ? '-analytics' : IS_CMA ? '-cma' : '';
+// --cma / --analytics / --automations flags switch to that API's result files and labelled output
+const IS_CMA         = process.argv.includes('--cma');
+const IS_ANALYTICS   = process.argv.includes('--analytics');
+const IS_AUTOMATIONS = process.argv.includes('--automations');
+const API_LABEL = IS_AUTOMATIONS ? 'Automations' : IS_ANALYTICS ? 'Analytics' : IS_CMA ? 'CMA' : 'CDA';
+const SUFFIX    = IS_AUTOMATIONS ? '-automations' : IS_ANALYTICS ? '-analytics' : IS_CMA ? '-cma' : '';
 
 function loadJson<T>(filename: string, fallback: T): T {
   const p = path.join(REPORTS_DIR, filename);
@@ -285,13 +286,13 @@ function buildHtmlReport(report: RunReport): string {
     <div class="card"><div class="card-num red">${report.failed}</div><div class="card-label">Failed</div></div>
   </div>
 
-  <h2>Phase 2 — ${IS_ANALYTICS ? 'Doc-Declared Sample Response (no live Try Out "Send" button exists for this API)' : 'Try Out Panel Results'}</h2>
+  <h2>Phase 2 — ${(IS_ANALYTICS || IS_AUTOMATIONS) ? 'Doc-Declared Sample Response (no live Try Out "Send" button exists for this API)' : 'Try Out Panel Results'}</h2>
   <table>
     <thead><tr><th>Request</th><th>Method</th><th>Default Code</th><th>Actual Code</th><th>Status</th><th>Flags</th></tr></thead>
     <tbody>${tryOutRows || '<tr><td colspan="6">No Try Out results yet — run npm run tryout</td></tr>'}</tbody>
   </table>
 
-  <h2>Phase 3 — Doc ↔ ${IS_ANALYTICS ? '' : 'Try Out ↔ '}Postman Comparison</h2>
+  <h2>Phase 3 — Doc ↔ ${(IS_ANALYTICS || IS_AUTOMATIONS) ? '' : 'Try Out ↔ '}Postman Comparison</h2>
   <table>
     <thead><tr><th>Request</th><th>Endpoint</th><th>Status</th><th>Mismatches</th></tr></thead>
     <tbody>${compRows || '<tr><td colspan="4">No comparison results yet — run npm run compare</td></tr>'}</tbody>

@@ -58,6 +58,48 @@ error occurred` (the analytics data window appears to have aged past those
 dates). `runNewmanAnalytics.ts` rewrites both to a rolling last-30-days range
 before every run — the collection itself should probably be fixed upstream.
 
+## Automations Management API
+
+Same shape as Analytics — no live Try Out execution, so the doc's declared
+Sample Response is the comparison baseline. Unlike Analytics, this API has
+POST/PUT/DELETE, so request-body comparison (doc Sample Request ↔ Postman
+body) is real work here, not a no-op. Reuses the same org-scoped auth as
+Analytics (`CS_ORG_UID`, `CS_QA_EMAIL`/`CS_QA_PASSWORD`).
+
+```bash
+npm run automations          # scrape → newman → compare → report, end-to-end
+
+npm run scrape:automations   # scrape all 19 endpoints across 6 module pages
+npm run newman:automations   # create a disposable test project, run the collection live, delete it
+npm run compare:automations  # doc params/headers/request body ↔ Postman, + Newman response ↔ doc Sample Response
+npm run report:automations   # → reports/run-report-automations.html
+```
+
+**Test data lifecycle:** `runNewmanAutomations.ts` creates a disposable
+project before each run (for the Projects/Project Variables CRUD tests) and
+deletes it — plus the collection's own "Create a project" request, which
+creates a second one — in a `finally` block, so cleanup runs even if Newman
+fails. Automations/Execution Logs/Audit Logs/Accounts have no create
+endpoint (they only exist as a side effect of building/running an automation
+in the UI), so the runner best-effort searches existing projects in the org
+for one that already has automation data and borrows its UIDs for those
+folders; if none exist anywhere, those specific "Get a single X" requests
+get an unresolved `{{variable}}` and are marked as no-test-data rather than
+a false failure.
+
+**Known collection ordering issue (worked around, not a doc bug):** the
+Projects folder's own "Delete a project" request actually deletes
+`{{project_uid}}` — confirmed live: running the collection in its default
+folder order deleted the disposable project immediately after "Update a
+project," then every other folder 404'd because the project it depended on
+no longer existed. `runNewmanAutomations.ts` moves the Projects folder to
+run last so every other folder gets to use the project while it's still alive.
+
+**Response key names that don't match their param names (confirmed live,
+not a guess):** `Get all automations` returns `{"rules": [...]}`, not
+`{"automations": [...]}` — the singular endpoints and the other four modules
+(`executions`, `logs`, `accounts`, `projects`) all match their obvious name.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |

@@ -1,0 +1,310 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import dotenv from 'dotenv';
+import { fetchPostmanCollection } from '../../shared/postman/fetchCollection';
+import { ComparisonResult, Mismatch, DocRequest, TryOutData, TryOutTestResult, NewmanResult, PostmanRequest } from '../../../config/types';
+
+dotenv.config();
+
+const POSTMAN_AUTOMATIONS_COLLECTION_ID = process.env.POSTMAN_AUTOMATIONS_COLLECTION_ID ?? '';
+
+/**
+ * Three-way comparison for Automations Management API (no live Try Out
+ * execution exists, same as Analytics):
+ *   A = Doc description (scraped params/headers/request body)
+ *   B = Doc's static Sample Request/Response (stands in for a live "Try Out" result)
+ *   C = Postman collection definition + Newman execution results
+ *
+ * Checks:
+ *  1. Param/header field gaps: Doc ↔ Postman
+ *  2. Request body field gaps (POST/PUT): Postman body ↔ doc's declared Sample Request
+ *  3. Response body field gaps: Newman actual response ↔ doc's declared Sample Response
+ *  4. Newman execution failures (Postman request returned 4xx/5xx)
+ *  5. Coverage: endpoints in docs but missing from Postman, and vice versa
+ */
+export async function runComparisonAutomations(): Promise<ComparisonResult[]> {
+  const scrapedPath = path.join(__dirname, '../../../reports/scraped-requests-automations.json');
+  if (!fs.existsSync(scrapedPath)) {
+    throw new Error('scraped-requests-automations.json not found — run `npm run scrape:automations` first');
+  }
+  const scraped: Array<{ doc: DocRequest; tryOut: TryOutData }> = JSON.parse(fs.readFileSync(scrapedPath, 'utf-8'));
+
+  const tryOutResultsPath = path.join(__dirname, '../../../reports/tryout-results-automations.json');
+  const tryOutResults: TryOutTestResult[] = fs.existsSync(tryOutResultsPath)
+    ? JSON.parse(fs.readFileSync(tryOutResultsPath, 'utf-8'))
+    : [];
+
+  const newmanResultsPath = path.join(__dirname, '../../../reports/newman-results-automations.json');
+  const newmanResults: NewmanResult[] = fs.existsSync(newmanResultsPath)
+    ? JSON.parse(fs.readFileSync(newmanResultsPath, 'utf-8'))
+    : [];
+
+  let postmanRequests: PostmanRequest[] = [];
+  const cachedPostman = path.join(__dirname, '../../../reports/postman-collection-automations.json');
+  try {
+    postmanRequests = await fetchPostmanCollection(POSTMAN_AUTOMATIONS_COLLECTION_ID, 'postman-collection-automations.json');
+  } catch {
+    if (fs.existsSync(cachedPostman)) {
+      console.warn('⚠️  Using cached Automations Postman collection (live fetch failed)');
+      postmanRequests = JSON.parse(fs.readFileSync(cachedPostman, 'utf-8'));
+    } else {
+      throw new Error('Postman collection unavailable — check POSTMAN_API_KEY and POSTMAN_AUTOMATIONS_COLLECTION_ID');
+    }
+  }
+
+  const results: ComparisonResult[] = [];
+  const matchedPostmanNames = new Set<string>();
+
+  for (const { doc, tryOut } of scraped) {
+    const mismatches: Mismatch[] = [];
+
+    const postmanReq   = findByName(doc.name, postmanRequests, r => r.name);
+    if (postmanReq) matchedPostmanNames.add(postmanReq.name);
+    const newmanResult = findByName(doc.name, newmanResults, r => r.requestName);
+    const tryOutResult = findByName(doc.name, tryOutResults, r => r.requestName);
+
+    // ── 1. Param/header field gaps: Doc ↔ Postman ─────────────────────────
+    if (postmanReq) {
+      const postmanAllParamNames = new Set(postmanReq.params.map(p => norm(p.key)));
+      const docParamNames        = new Set(doc.params.map(p => norm(p.name)));
+
+      // Path variables (e.g. {{project_uid}}) live in the URL, not as query params
+      const pathVarNames = new Set(
+        Array.from((postmanReq.url ?? '').matchAll(/\{\{(\w+)\}\}/g)).map(m => norm(m[1]))
+      );
+
+      for (const p of postmanReq.params.filter(p => !p.disabled)) {
+        if (!docParamNames.has(norm(p.key))) {
+          mismatches.push({
+            type: 'missing_in_doc', field: p.key,
+            source: 'Postman → Doc',
+            detail: `Postman has param "${p.key}" — NOT found in the doc description`,
+            severity: 'error',
+          });
+        }
+      }
+      for (const p of doc.params) {
+        if (!postmanAllParamNames.has(norm(p.name)) && !pathVarNames.has(norm(p.name))) {
+          mismatches.push({
+            type: 'missing_in_postman', field: p.name,
+            source: 'Doc → Postman',
+            detail: `Doc has param "${p.name}" but the Postman collection does not have it (even as disabled)`,
+            severity: 'warning',
+          });
+        }
+      }
+
+      const GLOBAL_HEADERS = new Set(['authtoken', 'organizationuid', 'contenttype']);
+      const docHeaderNames     = new Set(doc.headers.map(h => norm(h.name)));
+      const postmanHeaderNames = new Set(postmanReq.headers.map(h => norm(h.key)));
+      for (const h of postmanReq.headers) {
+        if (GLOBAL_HEADERS.has(norm(h.key))) continue;
+        if (!docHeaderNames.has(norm(h.key))) {
+          mismatches.push({
+            type: 'missing_in_doc', field: h.key,
+            source: 'Postman → Doc (header)',
+            detail: `Postman has header "${h.key}" not documented`,
+            severity: 'warning',
+          });
+        }
+      }
+      for (const h of doc.headers) {
+        if (GLOBAL_HEADERS.has(norm(h.name))) continue;
+        if (!postmanHeaderNames.has(norm(h.name))) {
+          mismatches.push({
+            type: 'missing_in_postman', field: h.name,
+            source: 'Doc → Postman (header)',
+            detail: `Doc lists header "${h.name}" not in Postman collection`,
+            severity: 'warning',
+          });
+        }
+      }
+    } else {
+      mismatches.push({
+        type: 'missing_in_postman',
+        source: 'Doc → Postman',
+        detail: `No matching request found in the Automations Postman collection for "${doc.name}"`,
+        severity: 'warning',
+      });
+    }
+
+    // ── 2. Request body field comparison (POST/PUT): Postman ↔ doc's Sample Request ─
+    if (doc.method === 'POST' || doc.method === 'PUT') {
+      const postmanBodyKeys = extractKeys(postmanReq?.body?.raw);
+      const docBodyKeys     = extractKeys(tryOut.bodyContent);
+
+      if (postmanBodyKeys && docBodyKeys) {
+        const pmSet = new Set(postmanBodyKeys.map(norm));
+        const dcSet = new Set(docBodyKeys.map(norm));
+        for (const key of postmanBodyKeys) {
+          if (!dcSet.has(norm(key))) {
+            mismatches.push({
+              type: 'request_body_mismatch', field: key,
+              source: 'Postman request body → Doc Sample Request',
+              detail: `Postman request body has field "${key}" that is missing from the doc's declared Sample Request`,
+              severity: 'error',
+            });
+          }
+        }
+        for (const key of docBodyKeys) {
+          if (!pmSet.has(norm(key))) {
+            mismatches.push({
+              type: 'request_body_mismatch', field: key,
+              source: 'Doc Sample Request → Postman request body',
+              detail: `Doc's Sample Request has field "${key}" that is missing from the Postman request body`,
+              severity: 'error',
+            });
+          }
+        }
+      } else if (postmanBodyKeys && !docBodyKeys) {
+        mismatches.push({
+          type: 'request_body_mismatch',
+          source: 'Postman → Doc (request body)',
+          detail: `Postman has a request body (${postmanBodyKeys.join(', ')}) but the doc's Sample Request is empty or unavailable`,
+          severity: 'warning',
+        });
+      } else if (!postmanBodyKeys && docBodyKeys) {
+        mismatches.push({
+          type: 'request_body_mismatch',
+          source: 'Doc → Postman (request body)',
+          detail: `Doc has a Sample Request (${docBodyKeys.join(', ')}) but Postman has no request body`,
+          severity: 'warning',
+        });
+      }
+    }
+
+    // ── 3. Response body field gaps: Newman ↔ doc's declared Sample Response ─
+    const newmanHadUnresolved = newmanResult?.error?.includes('Unresolved variable');
+    if (newmanResult && tryOutResult && !newmanHadUnresolved) {
+      const newmanKeys = newmanResult.responseBodyKeys;
+      const docKeys     = tryOutResult.responseBodyKeys;
+
+      if (newmanKeys && docKeys) {
+        const nmSet = new Set(newmanKeys.map(norm));
+        const dcSet = new Set(docKeys.map(norm));
+        for (const key of newmanKeys) {
+          if (!dcSet.has(norm(key))) {
+            mismatches.push({
+              type: 'response_body_mismatch', field: key,
+              source: 'Newman response → Doc Sample Response',
+              detail: `Postman (Newman) response has field "${key}" that is missing from the doc's declared Sample Response`,
+              severity: 'warning',
+            });
+          }
+        }
+        for (const key of docKeys) {
+          if (!nmSet.has(norm(key))) {
+            mismatches.push({
+              type: 'response_body_mismatch', field: key,
+              source: 'Doc Sample Response → Newman response',
+              detail: `Doc's Sample Response has field "${key}" that is missing from the actual Postman (Newman) response`,
+              severity: 'warning',
+            });
+          }
+        }
+      }
+
+      if (!newmanResult.passed) {
+        const isNoTestData = newmanResult.error?.includes('Unresolved variable');
+        mismatches.push({
+          type: 'newman_failure',
+          source: 'Postman (Newman)',
+          detail: isNoTestData
+            ? `Postman request returned ${newmanResult.responseCode} — URL has an unresolved {{variable}} (no automation/execution/audit-log/account exists in the org to test against)`
+            : `Postman request returned ${newmanResult.responseCode}${newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
+          severity: isNoTestData ? 'warning' : 'error',
+        });
+      }
+    } else if (!newmanResult) {
+      mismatches.push({
+        type: 'newman_failure',
+        source: 'Newman',
+        detail: `No Newman result found for "${doc.name}" — request may not be in the Postman collection`,
+        severity: 'warning',
+      });
+    } else if (newmanResult && !newmanResult.passed) {
+      const isNoTestData = newmanResult.error?.includes('Unresolved variable');
+      mismatches.push({
+        type: 'newman_failure',
+        source: 'Postman (Newman)',
+        detail: isNoTestData
+          ? `Postman request returned ${newmanResult.responseCode} — URL has an unresolved {{variable}} (no test data available)`
+          : `Postman request returned ${newmanResult.responseCode}${newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
+        severity: isNoTestData ? 'warning' : 'error',
+      });
+    }
+
+    const errors   = mismatches.filter(m => m.severity === 'error').length;
+    const warnings = mismatches.filter(m => m.severity === 'warning').length;
+
+    results.push({
+      requestName: doc.name,
+      endpoint:    doc.endpoint,
+      method:      doc.method,
+      docUrl:      doc.docUrl,
+      mismatches,
+      status: errors > 0 ? 'fail' : warnings > 0 ? 'warning' : 'pass',
+    });
+  }
+
+  // ── Coverage: Postman requests missing from the docs ───────────────────
+  for (const pm of postmanRequests) {
+    if (matchedPostmanNames.has(pm.name)) continue;
+    const docMatch = findByName(pm.name, scraped, s => s.doc.name);
+    if (docMatch) continue;
+    results.push({
+      requestName: pm.name,
+      endpoint:    pm.url ?? '',
+      method:      pm.method ?? '',
+      docUrl:      '',
+      mismatches: [{
+        type: 'missing_in_doc',
+        source: 'Postman → Doc',
+        detail: `Postman collection has request "${pm.name}" (${pm.method ?? ''}) with no matching request in the docs`,
+        severity: 'warning',
+      }],
+      status: 'warning',
+    });
+  }
+
+  const outPath = path.join(__dirname, '../../../reports/comparison-results-automations.json');
+  fs.writeFileSync(outPath, JSON.stringify(results, null, 2));
+
+  const pass = results.filter(r => r.status === 'pass').length;
+  const warn = results.filter(r => r.status === 'warning').length;
+  const fail = results.filter(r => r.status === 'fail').length;
+  console.log(`\n📊  Comparison done (Automations) — ✅ ${pass} pass  ⚠️ ${warn} warning  ❌ ${fail} fail`);
+  console.log(`📝  Results → ${outPath}`);
+
+  return results;
+}
+
+function norm(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function sortedWords(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).sort().join('');
+}
+
+function findByName<T>(docName: string, list: T[], getName: (item: T) => string): T | undefined {
+  const target = norm(docName);
+  const targetSorted = sortedWords(docName);
+  return list.find(item => norm(getName(item)) === target)
+    ?? list.find(item => {
+        const n = norm(getName(item));
+        return n.includes(target) || target.includes(n);
+      })
+    ?? list.find(item => sortedWords(getName(item)) === targetSorted);
+}
+
+function extractKeys(raw: string | undefined | null): string[] | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw.trim());
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return Object.keys(parsed);
+  } catch { /* not JSON */ }
+  return undefined;
+}
+
+runComparisonAutomations().catch(console.error);
