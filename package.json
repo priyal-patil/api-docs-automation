@@ -30,6 +30,12 @@
     "report:automations": "ts-node src/shared/reporter/generateReport.ts --automations",
     "automations": "npm run scrape:automations && npm run newman:automations && npm run compare:automations && npm run report:automations",
 
+    "scrape:brandkit": "ts-node src/brandkit/scraper/scrapeAllBrandKit.ts",
+    "newman:brandkit": "ts-node src/brandkit/postman/runNewmanBrandKit.ts",
+    "compare:brandkit": "ts-node src/brandkit/postman/compareBrandKit.ts",
+    "report:brandkit": "ts-node src/shared/reporter/generateReport.ts --brandkit",
+    "brandkit": "npm run scrape:brandkit && npm run newman:brandkit && npm run compare:brandkit && npm run report:brandkit",
+
     "test": "playwright test"
   },
   "dependencies": {

@@ -100,6 +100,46 @@ not a guess):** `Get all automations` returns `{"rules": [...]}`, not
 `{"automations": [...]}` — the singular endpoints and the other four modules
 (`executions`, `logs`, `accounts`, `projects`) all match their obvious name.
 
+## Brand Kit Management API
+
+Same shape as Automations — no live Try Out execution, POST/PUT/DELETE so
+request-body comparison is real work. Unlike Automations, every resource
+(Brand Kit, Voice Profile, Custom Credentials) has a real Create/Set
+endpoint, so the whole lifecycle is fully disposable — no need to borrow
+data from an existing org resource. Reuses the same org-scoped auth
+(`CS_ORG_UID`, `CS_QA_EMAIL`/`CS_QA_PASSWORD`); also needs `CS_API_KEY`
+(the same stack key CDA/CMA use) for one specific fix below.
+
+```bash
+npm run brandkit          # scrape → newman → compare → report, end-to-end
+
+npm run scrape:brandkit   # scrape all 12 endpoints across 3 module pages
+npm run newman:brandkit   # create a disposable test Brand Kit + Voice Profile, run the collection live, delete them
+npm run compare:brandkit  # doc params/headers/request body ↔ Postman, + Newman response ↔ doc Sample Response
+npm run report:brandkit   # → reports/run-report-brandkit.html
+```
+
+**Known collection ordering issues (worked around, not doc bugs):**
+- The Brand Kit folder's own "Delete Brand Kit" request deletes
+  `{{brand_kit_uid}}` — same class of issue as Automations' Projects folder.
+  `runNewmanBrandKit.ts` moves Brand Kit to run last so Voice Profile and
+  Custom Credentials get to use it while it's still alive.
+- "Get Custom Credentials" runs before "Set Custom Credentials" in the
+  collection's default order — confirmed live, GET 400s with a misleading
+  "Unable to fetch Brand Kit... uid is invalid" on a brand kit that has never
+  had an LLM config set, and succeeds once Set has run. Swapped the order.
+
+**Known validation quirks (confirmed live, worked around):**
+- `Create Brand Kit`/`Update Brand Kit` hardcode a placeholder `api_keys`
+  value that 400s ("is invalid") — real stack API keys are required.
+- Asymmetric validation: `Create Brand Kit` accepts `api_keys: []` fine, but
+  `Update Brand Kit` requires at least one real key ("should be more than
+  1"). Fixed by sending `[]` for Create and `[CS_API_KEY]` for Update.
+
+**Doc drift found (reported, not silently fixed):** `Get All Voice Profiles`'
+Sample Response is documented with a singular `voice_profile` key; the live
+API actually returns the plural `voice_profiles`.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |

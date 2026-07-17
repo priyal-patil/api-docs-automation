@@ -11,12 +11,19 @@ const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL ?? '';
 const ALERT_EMAIL_PASSWORD = process.env.ALERT_EMAIL_PASSWORD ?? '';
 const REPORTS_DIR = path.join(__dirname, '../../../reports');
 
-// --cma / --analytics / --automations flags switch to that API's result files and labelled output
-const IS_CMA         = process.argv.includes('--cma');
-const IS_ANALYTICS   = process.argv.includes('--analytics');
-const IS_AUTOMATIONS = process.argv.includes('--automations');
-const API_LABEL = IS_AUTOMATIONS ? 'Automations' : IS_ANALYTICS ? 'Analytics' : IS_CMA ? 'CMA' : 'CDA';
-const SUFFIX    = IS_AUTOMATIONS ? '-automations' : IS_ANALYTICS ? '-analytics' : IS_CMA ? '-cma' : '';
+// Each flag switches to that API's result files and labelled output.
+// noLiveTryOut: true for APIs whose docs have no Try Out "Send" button
+// (Analytics, Automations, Brand Kit) — CDA/CMA have live Try Out execution.
+const API_FLAGS: Array<{ flag: string; label: string; suffix: string; noLiveTryOut?: boolean }> = [
+  { flag: '--cma',         label: 'CMA',         suffix: '-cma' },
+  { flag: '--analytics',   label: 'Analytics',   suffix: '-analytics',   noLiveTryOut: true },
+  { flag: '--automations', label: 'Automations', suffix: '-automations', noLiveTryOut: true },
+  { flag: '--brandkit',    label: 'Brand Kit',   suffix: '-brandkit',    noLiveTryOut: true },
+];
+const activeApi     = API_FLAGS.find(a => process.argv.includes(a.flag));
+const API_LABEL     = activeApi?.label ?? 'CDA';
+const SUFFIX        = activeApi?.suffix ?? '';
+const NO_LIVE_TRYOUT = activeApi?.noLiveTryOut ?? false;
 
 function loadJson<T>(filename: string, fallback: T): T {
   const p = path.join(REPORTS_DIR, filename);
@@ -286,13 +293,13 @@ function buildHtmlReport(report: RunReport): string {
     <div class="card"><div class="card-num red">${report.failed}</div><div class="card-label">Failed</div></div>
   </div>
 
-  <h2>Phase 2 — ${(IS_ANALYTICS || IS_AUTOMATIONS) ? 'Doc-Declared Sample Response (no live Try Out "Send" button exists for this API)' : 'Try Out Panel Results'}</h2>
+  <h2>Phase 2 — ${NO_LIVE_TRYOUT ? 'Doc-Declared Sample Response (no live Try Out "Send" button exists for this API)' : 'Try Out Panel Results'}</h2>
   <table>
     <thead><tr><th>Request</th><th>Method</th><th>Default Code</th><th>Actual Code</th><th>Status</th><th>Flags</th></tr></thead>
     <tbody>${tryOutRows || '<tr><td colspan="6">No Try Out results yet — run npm run tryout</td></tr>'}</tbody>
   </table>
 
-  <h2>Phase 3 — Doc ↔ ${(IS_ANALYTICS || IS_AUTOMATIONS) ? '' : 'Try Out ↔ '}Postman Comparison</h2>
+  <h2>Phase 3 — Doc ↔ ${NO_LIVE_TRYOUT ? '' : 'Try Out ↔ '}Postman Comparison</h2>
   <table>
     <thead><tr><th>Request</th><th>Endpoint</th><th>Status</th><th>Mismatches</th></tr></thead>
     <tbody>${compRows || '<tr><td colspan="4">No comparison results yet — run npm run compare</td></tr>'}</tbody>
