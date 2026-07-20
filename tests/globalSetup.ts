@@ -86,15 +86,18 @@ async function fetchLiveTestData(): Promise<Record<string, string>> {
 }
 
 export default async function globalSetup() {
-  // Clear tryout results once before the entire test run — never re-runs on retries
-  const resultsDir = path.join(__dirname, '../reports/individual');
-  fs.mkdirSync(resultsDir, { recursive: true });
-
-  // Remove any leftover individual result files from previous run
-  for (const file of fs.readdirSync(resultsDir)) {
-    fs.unlinkSync(path.join(resultsDir, file));
+  // Clear tryout results once before the entire test run — never re-runs on retries.
+  // Each API's individual-results dir is cleared independently — otherwise
+  // leftover files from renamed/removed requests in past runs silently
+  // accumulate and get consolidated alongside current results.
+  for (const dir of ['../reports/individual', '../reports/individual-imagedelivery']) {
+    const resultsDir = path.join(__dirname, dir);
+    fs.mkdirSync(resultsDir, { recursive: true });
+    for (const file of fs.readdirSync(resultsDir)) {
+      fs.unlinkSync(path.join(resultsDir, file));
+    }
   }
-  console.log('🧹  Cleared previous Try Out results');
+  console.log('🧹  Cleared previous Try Out results (CDA + Image Delivery)');
 
   console.log('🔍  Fetching live test data from the QA stack (avoids stale hardcoded UIDs)...');
   const liveData = await fetchLiveTestData();

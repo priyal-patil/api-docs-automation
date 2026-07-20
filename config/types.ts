@@ -69,7 +69,7 @@ export interface ComparisonResult {
 }
 
 export interface Mismatch {
-  type: 'missing_in_doc' | 'missing_in_tryout' | 'missing_in_postman' | 'name_mismatch' | 'required_mismatch' | 'body_mismatch' | 'extra_in_tryout' | 'default_error_response' | 'request_body_mismatch' | 'response_body_mismatch' | 'newman_failure' | 'known_collection_issue';
+  type: 'missing_in_doc' | 'missing_in_tryout' | 'missing_in_postman' | 'name_mismatch' | 'required_mismatch' | 'body_mismatch' | 'extra_in_tryout' | 'default_error_response' | 'request_body_mismatch' | 'response_body_mismatch' | 'newman_failure' | 'known_collection_issue' | 'tryout_execution_failure';
   field?: string;
   source: string;
   detail: string;

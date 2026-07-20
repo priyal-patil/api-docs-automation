@@ -48,6 +48,12 @@
     "report:knowledgevault": "ts-node src/shared/reporter/generateReport.ts --knowledgevault",
     "knowledgevault": "npm run scrape:knowledgevault && npm run newman:knowledgevault && npm run compare:knowledgevault && npm run report:knowledgevault",
 
+    "scrape:imagedelivery": "ts-node src/imagedelivery/scraper/scrapeAllImageDelivery.ts",
+    "tryout:imagedelivery": "playwright test tests/imagedelivery/tryout-imagedelivery.spec.ts --reporter=html",
+    "compare:imagedelivery": "ts-node src/imagedelivery/compare/compareImageDelivery.ts",
+    "report:imagedelivery": "ts-node src/shared/reporter/generateReport.ts --imagedelivery",
+    "imagedelivery": "npm run scrape:imagedelivery && npm run tryout:imagedelivery && npm run compare:imagedelivery && npm run report:imagedelivery",
+
     "test": "playwright test"
   },
   "dependencies": {

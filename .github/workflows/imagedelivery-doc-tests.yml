@@ -1,0 +1,78 @@
+name: Contentstack Doc Automation — Image Delivery Daily Run
+
+on:
+  schedule:
+    - cron: '30 22 * * *'   # 4:00 AM IST (IST = UTC+5:30, so 22:30 UTC the previous day) — same slot as the other daily runs
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+  push:
+    branches: [main]
+    paths:
+      - 'src/imagedelivery/**'
+      - 'tests/imagedelivery/**'
+      - 'src/shared/**'
+      - '.env.example'
+
+jobs:
+  run-imagedelivery-automation:
+    runs-on: ubuntu-latest
+    # ~20 modules, live Try Out on every request (like CDA/CMA) but no
+    # Newman/Postman phase — sized generously until a real run confirms it.
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << EOF
+          SLACK_CHANNEL_EMAIL=${{ secrets.SLACK_CHANNEL_EMAIL }}
+          ALERT_FROM_EMAIL=${{ secrets.ALERT_FROM_EMAIL }}
+          ALERT_EMAIL_PASSWORD=${{ secrets.ALERT_EMAIL_PASSWORD }}
+          EOF
+
+      - name: Phase 1 — Scrape Image Delivery API documentation
+        run: npm run scrape:imagedelivery
+        continue-on-error: true   # don't stop pipeline if scraping partially fails
+
+      - name: Phase 2 — Live Try Out panel tests (no Postman collection exists for this API)
+        run: npm run tryout:imagedelivery
+        continue-on-error: true
+
+      - name: Phase 3 — Doc ↔ Try Out comparison (+ 4xx/5xx before/after Send)
+        run: npm run compare:imagedelivery
+        continue-on-error: true
+
+      - name: Phase 4 — Generate report + send Slack report
+        run: npm run report:imagedelivery
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: imagedelivery-doc-automation-report-${{ github.run_number }}
+          path: reports/run-report-imagedelivery.*
+          retention-days: 30
+
+      - name: Fail job if critical failures
+        run: |
+          node -e "
+            const r = require('./reports/run-report-imagedelivery.json');
+            if (r.failed > 0) {
+              console.error('❌ ' + r.failed + ' failure(s) detected');
+              process.exit(1);
+            }
+            console.log('✅ All checks passed');
+          "
