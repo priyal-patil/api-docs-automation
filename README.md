@@ -215,6 +215,68 @@ example as a failure (not just a warning) since neither source is usable as-is.
 required on `Ingest Content Item`, but the live API accepts omitting it and
 auto-assigns a default folder.
 
+## Lytics CDP Management API
+
+Org-scoped auth (`CS_ORG_UID`, `CS_QA_EMAIL`/`CS_QA_PASSWORD`), same as
+Automations/Brand Kit. Unlike every other product here, **there is no
+Postman collection** — instead the API publishes a live OpenAPI 3.0 spec at
+`https://<region-host>/openapi`, which stands in for the Postman collection
+as the third leg of the comparison (Doc ↔ Try Out ↔ OpenAPI spec + live
+execution), and a custom executor (`runSwaggerLytics.ts`) replaces Newman,
+calling the 10 real endpoints directly via axios instead of running a
+Postman collection. Unlike Automations/Brand Kit, the doc's "Open Builder"
+panel **is live** (confirmed by manually filling real credentials and
+clicking Send Request) — so this product line has a real Playwright Try Out
+phase (`tests/lytics/tryout-lytics.spec.ts`), same shape as CDA/CMA.
+
+```bash
+npm run lytics          # scrape → tryout → swagger execution → compare → report, end-to-end
+
+npm run scrape:lytics   # scrape all 10 endpoints across 3 module pages (Projects, Collaborators, Roles)
+npm run tryout:lytics   # live Try Out panel tests (fills authtoken/organization_uid/id/userUid, clicks Send)
+npm run swagger:lytics  # create a disposable test project + collaborator, run the OpenAPI-described requests live, delete them
+npm run compare:lytics  # doc params/headers/request body ↔ OpenAPI spec, + live response ↔ doc Sample Response
+npm run report:lytics   # → reports/run-report-lytics.html
+```
+
+**Confirmed live bug — every documented endpoint 404s:** all 10 routes
+(`/projects`, `/projects/{id}`, `/projects/{id}/collaborators`,
+`/projects/{id}/roles`, etc.) return a genuine `404 Cannot GET/POST/PUT/
+DELETE ...` on the live host, despite being declared in that same host's own
+`/openapi` spec and rendered in the doc's Try Out panel. Confirmed three
+independent ways: direct axios calls to the bare path, the doc's own live
+"Open Builder" → Send Request panel (with real `authtoken`/
+`organization_uid` filled in), and by ruling out routing/auth issues
+(`/health` on the same host returns `200`, and the `/api-gateway` proxy path
+returns a *different* auth-shaped 401, confirming the app is up and
+selectively routing). The OpenAPI spec and the deployed service have fully
+diverged — this needs to be reported to whoever owns the Lytics API. Until
+it's fixed, every run of this pipeline will show all 10 requests failing.
+
+**Test data lifecycle:** creates a disposable project (`Create a project`),
+exercises Get/Update/List against it, invites `CS_QA_SECOND_EMAIL` as a
+collaborator (skipped with a "no-test-data" marker, not a false failure, if
+that secret isn't set), updates their role, then in a `finally` block
+removes the collaborator and deletes the project. Because Create currently
+404s and never returns a real project id, downstream calls proceed with a
+placeholder id (`unresolved-project-uid` for the Swagger executor,
+`test-project-uid` for the live Try Out spec) so every endpoint still gets
+an honest execution result instead of silently vanishing from the report.
+
+**Undocumented response shapes (confirmed live):** every 2xx response in the
+OpenAPI spec declares only a `description`, no `content`/schema — so the
+collaborator UID needed for the role-update/remove calls can't be derived
+from the spec ahead of time. `runSwaggerLytics.ts` best-effort resolves it
+from the live "List collaborators" response instead (tries `userUid`/`uid`/
+`id`/`user_uid`); if that fails, the dependent calls are marked
+no-test-data rather than false-failed. This gap itself is also surfaced as
+a normal `missing_in_doc`-style finding by the comparator when relevant.
+
+**Region hosts:** confirmed from the Swagger page's own "Servers" list —
+`lytics-api.contentstack.com` (US), with `eu-`/`au-`/`azure-na-`/`azure-eu-`/
+`gcp-na-`/`gcp-eu-` prefixes for other regions (no `-prod-` infix, unlike
+Automations).
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |

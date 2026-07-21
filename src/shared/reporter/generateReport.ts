@@ -13,12 +13,16 @@ const REPORTS_DIR = path.join(__dirname, '../../../reports');
 
 // Each flag switches to that API's result files and labelled output.
 // noLiveTryOut: true for APIs whose docs have no Try Out "Send" button
-// (Analytics, Automations, Brand Kit, GenAI, Knowledge Vault) — CDA/CMA and
-// Image Delivery have live Try Out execution.
+// (Analytics, Automations, Brand Kit, GenAI, Knowledge Vault) — CDA/CMA,
+// Image Delivery, and Lytics have live Try Out execution.
 // noPostman: true for APIs with no Postman collection at all (Image
 // Delivery) — comparison there is Doc ↔ Try Out only, and there is no
 // Newman phase/section to render.
-const API_FLAGS: Array<{ flag: string; label: string; suffix: string; noLiveTryOut?: boolean; noPostman?: boolean }> = [
+// executorLabel/executorDesc: override the "Postman"/"Newman" wording in the
+// report for products whose execution phase isn't Postman at all (Lytics
+// uses a live OpenAPI spec + a custom executor instead) — the 3-way section
+// layout (Doc / Try Out / Executor) stays the same, only the label changes.
+const API_FLAGS: Array<{ flag: string; label: string; suffix: string; noLiveTryOut?: boolean; noPostman?: boolean; executorLabel?: string; executorDesc?: string }> = [
   { flag: '--cma',         label: 'CMA',         suffix: '-cma' },
   { flag: '--analytics',   label: 'Analytics',   suffix: '-analytics',   noLiveTryOut: true },
   { flag: '--automations', label: 'Automations', suffix: '-automations', noLiveTryOut: true },
@@ -26,12 +30,15 @@ const API_FLAGS: Array<{ flag: string; label: string; suffix: string; noLiveTryO
   { flag: '--genai',       label: 'Generative AI', suffix: '-genai',     noLiveTryOut: true },
   { flag: '--knowledgevault', label: 'Knowledge Vault', suffix: '-knowledgevault', noLiveTryOut: true },
   { flag: '--imagedelivery', label: 'Image Delivery', suffix: '-imagedelivery', noPostman: true },
+  { flag: '--lytics',      label: 'Lytics',      suffix: '-lytics',      executorLabel: 'Swagger', executorDesc: 'OpenAPI Spec Execution' },
 ];
 const activeApi     = API_FLAGS.find(a => process.argv.includes(a.flag));
 const API_LABEL     = activeApi?.label ?? 'CDA';
 const SUFFIX        = activeApi?.suffix ?? '';
 const NO_LIVE_TRYOUT = activeApi?.noLiveTryOut ?? false;
 const NO_POSTMAN     = activeApi?.noPostman ?? false;
+const EXECUTOR_LABEL = activeApi?.executorLabel ?? 'Postman';
+const EXECUTOR_DESC  = activeApi?.executorDesc ?? 'Postman Collection Execution';
 
 function loadJson<T>(filename: string, fallback: T): T {
   const p = path.join(REPORTS_DIR, filename);
@@ -166,7 +173,7 @@ async function sendSlackEmailReport(report: RunReport): Promise<void> {
   }
 
   if (failedComparisons.length > 0) {
-    lines.push(NO_POSTMAN ? 'Doc ↔ Try Out Mismatches:' : 'Doc ↔ Postman Mismatches:');
+    lines.push(NO_POSTMAN ? 'Doc ↔ Try Out Mismatches:' : `Doc ↔ ${EXECUTOR_LABEL} Mismatches:`);
     for (const r of failedComparisons.slice(0, 5)) {
       const top = r.mismatches.filter(m => m.severity === 'error').slice(0, 2);
       lines.push(`  • ${r.requestName}: ${top.map(m => m.detail).join(' | ')}`);
@@ -176,7 +183,7 @@ async function sendSlackEmailReport(report: RunReport): Promise<void> {
   }
 
   if (failedNewman.length > 0) {
-    lines.push('Postman (Newman) Failures:');
+    lines.push(`${EXECUTOR_LABEL} Failures:`);
     for (const r of failedNewman.slice(0, 5)) {
       lines.push(`  • ${r.requestName} — ${r.method} returned ${r.responseCode}${r.error ? ` (${r.error})` : ''}`);
     }
@@ -307,17 +314,17 @@ function buildHtmlReport(report: RunReport): string {
     <tbody>${tryOutRows || '<tr><td colspan="6">No Try Out results yet — run npm run tryout</td></tr>'}</tbody>
   </table>
 
-  <h2>Phase 3 — Doc ↔ ${NO_POSTMAN ? 'Try Out' : NO_LIVE_TRYOUT ? '' : 'Try Out ↔ '}${NO_POSTMAN ? '' : 'Postman '}Comparison</h2>
+  <h2>Phase 3 — Doc ↔ ${NO_POSTMAN ? 'Try Out' : NO_LIVE_TRYOUT ? '' : 'Try Out ↔ '}${NO_POSTMAN ? '' : EXECUTOR_LABEL + ' '}Comparison</h2>
   <table>
     <thead><tr><th>Request</th><th>Endpoint</th><th>Status</th><th>Mismatches</th></tr></thead>
     <tbody>${compRows || '<tr><td colspan="4">No comparison results yet — run npm run compare</td></tr>'}</tbody>
   </table>
 
   ${NO_POSTMAN ? '' : `
-  <h2>Phase 3b — Newman (Postman Collection Execution)</h2>
+  <h2>Phase 3b — ${EXECUTOR_LABEL} (${EXECUTOR_DESC})</h2>
   <table>
     <thead><tr><th>Request</th><th>Method</th><th>Response Code</th><th>Status</th><th>Request Body Keys</th><th>Response Body Keys</th><th>Error</th></tr></thead>
-    <tbody>${newmanRows || '<tr><td colspan="7">No Newman results yet — run npm run newman</td></tr>'}</tbody>
+    <tbody>${newmanRows || `<tr><td colspan="7">No ${EXECUTOR_LABEL} results yet — run npm run swagger (or the appropriate execute script)</td></tr>`}</tbody>
   </table>`}
 
   <h2>Phase 4 — Direct API Test Results</h2>

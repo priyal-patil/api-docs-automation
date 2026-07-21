@@ -54,6 +54,13 @@
     "report:imagedelivery": "ts-node src/shared/reporter/generateReport.ts --imagedelivery",
     "imagedelivery": "npm run scrape:imagedelivery && npm run tryout:imagedelivery && npm run compare:imagedelivery && npm run report:imagedelivery",
 
+    "scrape:lytics": "ts-node src/lytics/scraper/scrapeAllLytics.ts",
+    "tryout:lytics": "playwright test tests/lytics/tryout-lytics.spec.ts --reporter=html ; ts-node src/shared/scripts/consolidateTryout.ts lytics",
+    "swagger:lytics": "ts-node src/lytics/swagger/runSwaggerLytics.ts",
+    "compare:lytics": "ts-node src/lytics/swagger/compareLytics.ts",
+    "report:lytics": "ts-node src/shared/reporter/generateReport.ts --lytics",
+    "lytics": "npm run scrape:lytics && npm run tryout:lytics && npm run swagger:lytics && npm run compare:lytics && npm run report:lytics",
+
     "test": "playwright test"
   },
   "dependencies": {

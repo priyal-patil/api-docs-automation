@@ -1,0 +1,304 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import dotenv from 'dotenv';
+import { ComparisonResult, Mismatch, DocRequest, TryOutData, TryOutTestResult, NewmanResult, PostmanRequest } from '../../../config/types';
+import { fetchLyticsOpenApiSpec, parseSwaggerRequests } from './openApiSpec';
+
+dotenv.config();
+
+const REGION_HOSTS: Record<string, string> = {
+  us: 'lytics-api.contentstack.com', eu: 'eu-lytics-api.contentstack.com', au: 'au-lytics-api.contentstack.com',
+  'azure-na': 'azure-na-lytics-api.contentstack.com', 'azure-eu': 'azure-eu-lytics-api.contentstack.com',
+  'gcp-na': 'gcp-na-lytics-api.contentstack.com', 'gcp-eu': 'gcp-eu-lytics-api.contentstack.com',
+};
+const BASE_HOST = REGION_HOSTS[process.env.CS_REGION ?? 'us'] ?? 'lytics-api.contentstack.com';
+
+/**
+ * Three-way comparison for the Lytics CDP Management API — same shape as
+ * compareAutomations.ts, with the OpenAPI spec (fetched live from
+ * /openapi) standing in for a Postman collection, since Lytics has none:
+ *   A = Doc description (scraped params/headers/request body)
+ *   B = Doc's static Sample Request/Response (Try Out baseline — see the
+ *       ASSUMPTION comment in scrapeAllLytics.ts)
+ *   C = OpenAPI spec definition + live Swagger execution results
+ *       (runSwaggerLytics.ts, output shape reuses NewmanResult unchanged)
+ *
+ * Checks:
+ *  1. Param/header field gaps: Doc ↔ OpenAPI spec
+ *  2. Request body field gaps (POST/PUT): OpenAPI schema ↔ doc's declared Sample Request
+ *  3. Response body field gaps: live execution response ↔ doc's declared Sample Response
+ *  4. Execution failures (live request returned 4xx/5xx)
+ *  5. Coverage: endpoints in the spec but missing from the docs, and vice versa
+ */
+export async function runComparisonLytics(): Promise<ComparisonResult[]> {
+  const scrapedPath = path.join(__dirname, '../../../reports/scraped-requests-lytics.json');
+  if (!fs.existsSync(scrapedPath)) {
+    throw new Error('scraped-requests-lytics.json not found — run `npm run scrape:lytics` first');
+  }
+  const scraped: Array<{ doc: DocRequest; tryOut: TryOutData }> = JSON.parse(fs.readFileSync(scrapedPath, 'utf-8'));
+
+  const tryOutResultsPath = path.join(__dirname, '../../../reports/tryout-results-lytics.json');
+  const tryOutResults: TryOutTestResult[] = fs.existsSync(tryOutResultsPath)
+    ? JSON.parse(fs.readFileSync(tryOutResultsPath, 'utf-8'))
+    : [];
+
+  const newmanResultsPath = path.join(__dirname, '../../../reports/newman-results-lytics.json');
+  const newmanResults: NewmanResult[] = fs.existsSync(newmanResultsPath)
+    ? JSON.parse(fs.readFileSync(newmanResultsPath, 'utf-8'))
+    : [];
+
+  const spec = await fetchLyticsOpenApiSpec(BASE_HOST);
+  const swaggerRequests: PostmanRequest[] = parseSwaggerRequests(spec);
+
+  const results: ComparisonResult[] = [];
+  const matchedSwaggerNames = new Set<string>();
+
+  for (const { doc, tryOut } of scraped) {
+    const mismatches: Mismatch[] = [];
+
+    const swaggerReq    = findByName(doc.name, swaggerRequests, r => r.name);
+    if (swaggerReq) matchedSwaggerNames.add(swaggerReq.name);
+    const newmanResult  = findByName(doc.name, newmanResults, r => r.requestName);
+    const tryOutResult  = findByName(doc.name, tryOutResults, r => r.requestName);
+
+    // ── 1. Param/header field gaps: Doc ↔ OpenAPI spec ─────────────────────
+    if (swaggerReq) {
+      const swaggerParamNames = new Set(swaggerReq.params.map(p => norm(p.key)));
+      const docParamNames     = new Set(doc.params.map(p => norm(p.name)));
+
+      // Path variables (e.g. {id}, {userUid}) live in the URL template, not as query params
+      const pathVarNames = new Set(
+        Array.from((swaggerReq.url ?? '').matchAll(/\{(\w+)\}/g)).map(m => norm(m[1]))
+      );
+
+      for (const p of swaggerReq.params) {
+        if (!docParamNames.has(norm(p.key))) {
+          mismatches.push({
+            type: 'missing_in_doc', field: p.key,
+            source: 'OpenAPI spec → Doc',
+            detail: `OpenAPI spec has param "${p.key}" — NOT found in the doc description`,
+            severity: 'error',
+          });
+        }
+      }
+      for (const p of doc.params) {
+        if (!swaggerParamNames.has(norm(p.name)) && !pathVarNames.has(norm(p.name))) {
+          mismatches.push({
+            type: 'missing_in_postman', field: p.name,
+            source: 'Doc → OpenAPI spec',
+            detail: `Doc has param "${p.name}" but the OpenAPI spec does not declare it`,
+            severity: 'warning',
+          });
+        }
+      }
+
+      const GLOBAL_HEADERS = new Set(['authtoken', 'authorization', 'organizationuid', 'contenttype', 'xcsapiversion']);
+      const docHeaderNames     = new Set(doc.headers.map(h => norm(h.name)));
+      const swaggerHeaderNames = new Set(swaggerReq.headers.map(h => norm(h.key)));
+      for (const h of swaggerReq.headers) {
+        if (GLOBAL_HEADERS.has(norm(h.key))) continue;
+        if (!docHeaderNames.has(norm(h.key))) {
+          mismatches.push({
+            type: 'missing_in_doc', field: h.key,
+            source: 'OpenAPI spec → Doc (header)',
+            detail: `OpenAPI spec has header "${h.key}" not documented`,
+            severity: 'warning',
+          });
+        }
+      }
+      for (const h of doc.headers) {
+        if (GLOBAL_HEADERS.has(norm(h.name))) continue;
+        if (!swaggerHeaderNames.has(norm(h.name))) {
+          mismatches.push({
+            type: 'missing_in_postman', field: h.name,
+            source: 'Doc → OpenAPI spec (header)',
+            detail: `Doc lists header "${h.name}" not in the OpenAPI spec`,
+            severity: 'warning',
+          });
+        }
+      }
+    } else {
+      mismatches.push({
+        type: 'missing_in_postman',
+        source: 'Doc → OpenAPI spec',
+        detail: `No matching operation found in the Lytics OpenAPI spec for "${doc.name}"`,
+        severity: 'warning',
+      });
+    }
+
+    // ── 2. Request body field comparison (POST/PUT): OpenAPI schema ↔ doc's Sample Request ─
+    if (doc.method === 'POST' || doc.method === 'PUT') {
+      const swaggerBodyKeys = extractKeys(swaggerReq?.body?.raw);
+      const docBodyKeys     = extractKeys(tryOut.bodyContent);
+
+      if (swaggerBodyKeys && docBodyKeys) {
+        const swSet = new Set(swaggerBodyKeys.map(norm));
+        const dcSet = new Set(docBodyKeys.map(norm));
+        for (const key of swaggerBodyKeys) {
+          if (!dcSet.has(norm(key))) {
+            mismatches.push({
+              type: 'request_body_mismatch', field: key,
+              source: 'OpenAPI schema → Doc Sample Request',
+              detail: `OpenAPI request schema has field "${key}" that is missing from the doc's declared Sample Request`,
+              severity: 'error',
+            });
+          }
+        }
+        for (const key of docBodyKeys) {
+          if (!swSet.has(norm(key))) {
+            mismatches.push({
+              type: 'request_body_mismatch', field: key,
+              source: 'Doc Sample Request → OpenAPI schema',
+              detail: `Doc's Sample Request has field "${key}" that is missing from the OpenAPI request schema`,
+              severity: 'error',
+            });
+          }
+        }
+      } else if (swaggerBodyKeys && !docBodyKeys) {
+        mismatches.push({
+          type: 'request_body_mismatch',
+          source: 'OpenAPI schema → Doc (request body)',
+          detail: `OpenAPI spec has a request body (${swaggerBodyKeys.join(', ')}) but the doc's Sample Request is empty or unavailable`,
+          severity: 'warning',
+        });
+      } else if (!swaggerBodyKeys && docBodyKeys) {
+        mismatches.push({
+          type: 'request_body_mismatch',
+          source: 'Doc → OpenAPI schema (request body)',
+          detail: `Doc has a Sample Request (${docBodyKeys.join(', ')}) but the OpenAPI spec declares no request body`,
+          severity: 'warning',
+        });
+      }
+    }
+
+    // ── 3. Response body field gaps: live execution ↔ doc's declared Sample Response ─
+    const executionHadNoTestData = newmanResult?.error?.includes('no test data') || newmanResult?.error?.includes('No test data') || newmanResult?.error?.includes('no real second org user');
+    if (newmanResult && tryOutResult && !executionHadNoTestData) {
+      const liveKeys = newmanResult.responseBodyKeys;
+      const docKeys  = tryOutResult.responseBodyKeys;
+
+      if (liveKeys && docKeys) {
+        const liveSet = new Set(liveKeys.map(norm));
+        const dcSet   = new Set(docKeys.map(norm));
+        for (const key of liveKeys) {
+          if (!dcSet.has(norm(key))) {
+            mismatches.push({
+              type: 'response_body_mismatch', field: key,
+              source: 'Live Swagger response → Doc Sample Response',
+              detail: `Live execution response has field "${key}" that is missing from the doc's declared Sample Response`,
+              severity: 'warning',
+            });
+          }
+        }
+        for (const key of docKeys) {
+          if (!liveSet.has(norm(key))) {
+            mismatches.push({
+              type: 'response_body_mismatch', field: key,
+              source: 'Doc Sample Response → Live Swagger response',
+              detail: `Doc's Sample Response has field "${key}" that is missing from the actual live response`,
+              severity: 'warning',
+            });
+          }
+        }
+      }
+
+      if (!newmanResult.passed) {
+        mismatches.push({
+          type: 'newman_failure',
+          source: 'Swagger execution',
+          detail: `Live request returned ${newmanResult.responseCode}${newmanResult.error ? ` — ${newmanResult.error}` : ''}`,
+          severity: 'error',
+        });
+      }
+    } else if (!newmanResult) {
+      mismatches.push({
+        type: 'newman_failure',
+        source: 'Swagger execution',
+        detail: `No live execution result found for "${doc.name}" — request may not be covered by the runner's lifecycle`,
+        severity: 'warning',
+      });
+    } else if (newmanResult && !newmanResult.passed) {
+      // executionHadNoTestData true here means "passed: true" was forced by callSkipped(),
+      // so reaching this branch with !passed means a REAL execution failure without a doc match.
+      mismatches.push({
+        type: 'newman_failure',
+        source: 'Swagger execution',
+        detail: `Live request returned ${newmanResult.responseCode}${newmanResult.error ? ` — ${newmanResult.error}` : ''}`,
+        severity: 'error',
+      });
+    }
+
+    const errors   = mismatches.filter(m => m.severity === 'error').length;
+    const warnings = mismatches.filter(m => m.severity === 'warning').length;
+
+    results.push({
+      requestName: doc.name,
+      endpoint:    doc.endpoint,
+      method:      doc.method,
+      docUrl:      doc.docUrl,
+      mismatches,
+      status: errors > 0 ? 'fail' : warnings > 0 ? 'warning' : 'pass',
+    });
+  }
+
+  // ── Coverage: OpenAPI operations missing from the docs ──────────────────
+  for (const sw of swaggerRequests) {
+    if (matchedSwaggerNames.has(sw.name)) continue;
+    const docMatch = findByName(sw.name, scraped, s => s.doc.name);
+    if (docMatch) continue;
+    results.push({
+      requestName: sw.name,
+      endpoint:    sw.url ?? '',
+      method:      sw.method ?? '',
+      docUrl:      '',
+      mismatches: [{
+        type: 'missing_in_doc',
+        source: 'OpenAPI spec → Doc',
+        detail: `OpenAPI spec has operation "${sw.name}" (${sw.method ?? ''}) with no matching request in the docs`,
+        severity: 'warning',
+      }],
+      status: 'warning',
+    });
+  }
+
+  const outPath = path.join(__dirname, '../../../reports/comparison-results-lytics.json');
+  fs.writeFileSync(outPath, JSON.stringify(results, null, 2));
+
+  const pass = results.filter(r => r.status === 'pass').length;
+  const warn = results.filter(r => r.status === 'warning').length;
+  const fail = results.filter(r => r.status === 'fail').length;
+  console.log(`\n📊  Comparison done (Lytics) — ✅ ${pass} pass  ⚠️ ${warn} warning  ❌ ${fail} fail`);
+  console.log(`📝  Results → ${outPath}`);
+
+  return results;
+}
+
+function norm(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function sortedWords(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).sort().join('');
+}
+
+function findByName<T>(docName: string, list: T[], getName: (item: T) => string): T | undefined {
+  const target = norm(docName);
+  const targetSorted = sortedWords(docName);
+  return list.find(item => norm(getName(item)) === target)
+    ?? list.find(item => {
+        const n = norm(getName(item));
+        return n.includes(target) || target.includes(n);
+      })
+    ?? list.find(item => sortedWords(getName(item)) === targetSorted);
+}
+
+function extractKeys(raw: string | undefined | null): string[] | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw.trim());
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return Object.keys(parsed);
+  } catch { /* not JSON */ }
+  return undefined;
+}
+
+runComparisonLytics().catch(console.error);

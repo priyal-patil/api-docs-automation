@@ -1,0 +1,87 @@
+name: Contentstack Doc Automation — Lytics Daily Run
+
+on:
+  schedule:
+    - cron: '30 22 * * *'   # 4:00 AM IST (IST = UTC+5:30, so 22:30 UTC the previous day) — same slot as every other product line
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+  push:
+    branches: [main]
+    paths:
+      - 'src/lytics/**'
+      - 'src/shared/**'
+      - '.env.example'
+
+jobs:
+  run-lytics-automation:
+    runs-on: ubuntu-latest
+    # 10 endpoints, live Try Out phase (confirmed) — generous timeout until real run durations are known.
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << EOF
+          CS_ORG_UID=${{ secrets.CS_ORG_UID }}
+          CS_QA_EMAIL=${{ secrets.CS_QA_EMAIL }}
+          CS_QA_PASSWORD=${{ secrets.CS_QA_PASSWORD }}
+          CS_QA_SECOND_EMAIL=${{ secrets.CS_QA_SECOND_EMAIL }}
+          CS_AUTHTOKEN=${{ secrets.CS_AUTHTOKEN }}
+          CS_REGION=${{ secrets.CS_REGION || 'us' }}
+          SLACK_CHANNEL_EMAIL=${{ secrets.SLACK_CHANNEL_EMAIL }}
+          ALERT_FROM_EMAIL=${{ secrets.ALERT_FROM_EMAIL }}
+          ALERT_EMAIL_PASSWORD=${{ secrets.ALERT_EMAIL_PASSWORD }}
+          LYTICS_DOC_URL=https://www.contentstack.com/docs/developers/apis/lytics-cdp-management-api
+          EOF
+
+      - name: Phase 1 — Scrape Lytics CDP Management API documentation
+        run: npm run scrape:lytics
+        continue-on-error: true   # don't stop pipeline if scraping partially fails
+
+      - name: Phase 2 — Live Try Out panel tests
+        run: npm run tryout:lytics
+        continue-on-error: true
+
+      - name: Phase 3 — Swagger execution (creates a disposable test project + collaborator, runs the OpenAPI-described requests live, deletes them)
+        run: npm run swagger:lytics
+        continue-on-error: true
+
+      - name: Phase 4 — Doc ↔ Try Out ↔ OpenAPI spec comparison
+        run: npm run compare:lytics
+        continue-on-error: true
+
+      - name: Phase 5 — Generate report + send Slack report
+        run: npm run report:lytics
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lytics-doc-automation-report-${{ github.run_number }}
+          path: reports/run-report-lytics.*
+          retention-days: 30
+
+      - name: Fail job if critical failures
+        run: |
+          node -e "
+            const r = require('./reports/run-report-lytics.json');
+            if (r.failed > 0) {
+              console.error('❌ ' + r.failed + ' failure(s) detected');
+              process.exit(1);
+            }
+            console.log('✅ All checks passed');
+          "
