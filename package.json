@@ -68,6 +68,13 @@
     "report:personalize": "ts-node src/shared/reporter/generateReport.ts --personalize",
     "personalize": "npm run scrape:personalize && npm run tryout:personalize && npm run swagger:personalize && npm run compare:personalize && npm run report:personalize",
 
+    "scrape:personalizeedge": "ts-node src/personalizeedge/scraper/scrapeAllPersonalizeEdge.ts",
+    "tryout:personalizeedge": "playwright test tests/personalizeedge/tryout-personalizeedge.spec.ts --reporter=html ; ts-node src/shared/scripts/consolidateTryout.ts personalizeedge",
+    "swagger:personalizeedge": "ts-node src/personalizeedge/swagger/runSwaggerPersonalizeEdge.ts",
+    "compare:personalizeedge": "ts-node src/personalizeedge/swagger/comparePersonalizeEdge.ts",
+    "report:personalizeedge": "ts-node src/shared/reporter/generateReport.ts --personalizeedge",
+    "personalizeedge": "npm run scrape:personalizeedge && npm run tryout:personalizeedge && npm run swagger:personalizeedge && npm run compare:personalizeedge && npm run report:personalizeedge",
+
     "test": "playwright test"
   },
   "dependencies": {

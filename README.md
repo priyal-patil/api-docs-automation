@@ -393,6 +393,46 @@ Lytics' quota-limit handling), not hidden or special-cased away.
 (US), `eu-`/`au-`/`azure-na-`/`azure-eu-`/`gcp-na-`/`gcp-eu-` prefixes for
 other regions.
 
+## Personalize Edge API
+
+Small, public-facing sibling of Personalize Management — 4 endpoints across
+3 modules (Manifest, User Attributes, Events). Same no-Postman/live-OpenAPI-
+spec/live-Try-Out shape as Lytics and Personalize Management, but simpler in
+one key way: **confirmed live that this API requires no authentication at
+all** (it's meant for public digital properties) — only `x-project-uid`
+(always) and `x-cs-personalize-user-uid` (required for Events, optional
+elsewhere). Reuses `PERSONALIZE_PROJECT_UID` from the Management API — no
+new project-UID secret needed.
+
+```bash
+npm run personalizeedge          # scrape → tryout → swagger execution → compare → report, end-to-end
+
+npm run scrape:personalizeedge   # scrape all 4 endpoints across 3 module pages
+npm run tryout:personalizeedge   # live Try Out panel tests (no auth token to fill in)
+npm run swagger:personalizeedge  # Get Manifest (bootstraps a user UID) → Set User Attributes → Track Events → Merge, all live
+npm run compare:personalizeedge  # doc params/headers/request body ↔ OpenAPI spec, + live response ↔ doc Sample Response
+npm run report:personalizeedge   # → reports/run-report-personalizeedge.html
+```
+
+**Test data lifecycle:** calls `Get Manifest` *without* a user UID first —
+the API generates one and returns it via the `x-cs-personalize-user-uid`
+response header (this is the doc's own documented way to obtain a user UID
+for testing, not a workaround), then reuses that real UID for Set User
+Attributes, Track Events, and Merge (merging the user into itself — a safe
+no-op). No resources are created, so there's no cleanup/delete step at all
+— nothing to leave behind between runs, unlike every other product line.
+
+**Cleanest result of all 10 product lines:** the very first live run passed
+**4/4 with zero warnings and zero failures** — direct API calls, the live
+Try Out panel, and the comparator all agreed with no gotchas, no undocumented
+headers, no permission gaps. Confirmed this cleanly by checking explicitly
+for anything resembling the Lytics `x-cs-api-version` issue or the
+Personalize Management doc-gap findings — none found here.
+
+**Region hosts:** same shape as the other two Personalize APIs —
+`personalize-edge.contentstack.com` (US), `eu-`/`au-`/`azure-na-`/
+`azure-eu-`/`gcp-na-`/`gcp-eu-` prefixes for other regions.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |

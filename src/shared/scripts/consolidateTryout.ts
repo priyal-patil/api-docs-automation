@@ -25,9 +25,10 @@ const target = process.argv[2];
 const REPORTS_DIR = path.join(__dirname, '../../../reports');
 
 const PRODUCTS: Record<string, { dir: string; suffix: string; label: string }> = {
-  cma:         { dir: 'individual-cma',         suffix: '-cma',         label: 'CMA' },
-  lytics:      { dir: 'individual-lytics',      suffix: '-lytics',      label: 'Lytics' },
-  personalize: { dir: 'individual-personalize', suffix: '-personalize', label: 'Personalize' },
+  cma:             { dir: 'individual-cma',             suffix: '-cma',             label: 'CMA' },
+  lytics:          { dir: 'individual-lytics',          suffix: '-lytics',          label: 'Lytics' },
+  personalize:     { dir: 'individual-personalize',     suffix: '-personalize',     label: 'Personalize' },
+  personalizeedge: { dir: 'individual-personalizeedge', suffix: '-personalizeedge', label: 'Personalize Edge' },
 };
 
 const product = target ? PRODUCTS[target] : undefined;
