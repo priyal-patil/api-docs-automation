@@ -61,6 +61,13 @@
     "report:lytics": "ts-node src/shared/reporter/generateReport.ts --lytics",
     "lytics": "npm run scrape:lytics && npm run tryout:lytics && npm run swagger:lytics && npm run compare:lytics && npm run report:lytics",
 
+    "scrape:personalize": "ts-node src/personalize/scraper/scrapeAllPersonalize.ts",
+    "tryout:personalize": "playwright test tests/personalize/tryout-personalize.spec.ts --reporter=html ; ts-node src/shared/scripts/consolidateTryout.ts personalize",
+    "swagger:personalize": "ts-node src/personalize/swagger/runSwaggerPersonalize.ts",
+    "compare:personalize": "ts-node src/personalize/swagger/comparePersonalize.ts",
+    "report:personalize": "ts-node src/shared/reporter/generateReport.ts --personalize",
+    "personalize": "npm run scrape:personalize && npm run tryout:personalize && npm run swagger:personalize && npm run compare:personalize && npm run report:personalize",
+
     "test": "playwright test"
   },
   "dependencies": {

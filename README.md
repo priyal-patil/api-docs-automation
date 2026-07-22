@@ -299,6 +299,100 @@ a normal `missing_in_doc`-style finding by the comparator when relevant.
 `gcp-na-`/`gcp-eu-` prefixes for other regions (no `-prod-` infix, unlike
 Automations).
 
+## Personalize Management API
+
+Same shape as Lytics (no Postman collection — a live OpenAPI 3.0 spec at
+`https://personalize-api.contentstack.com/openapi` stands in, with a custom
+Swagger executor replacing Newman), and the doc's "Open Builder" panel is
+live here too (confirmed), so this product line gets a real Playwright Try
+Out phase. **Checked explicitly for a repeat of the Lytics `x-cs-api-version`
+gotcha — found clean**: this API only needs `authtoken` (or `authorization`
+Bearer) + `x-project-uid`, and project-scoped calls work correctly with just
+those two, no hidden required-but-undocumented header.
+
+```bash
+npm run personalize          # scrape → tryout → swagger execution → compare → report, end-to-end
+
+npm run scrape:personalize   # scrape all 28 endpoints across 7 module pages
+npm run tryout:personalize   # live Try Out panel tests
+npm run swagger:personalize  # full disposable Attribute/Event/Audience/Experience/Version lifecycle, live
+npm run compare:personalize  # doc params/headers/request body ↔ OpenAPI spec, + live response ↔ doc Sample Response
+npm run report:personalize   # → reports/run-report-personalize.html
+```
+
+**No "create project" endpoint exists.** Every one of the 28 endpoints is
+scoped to an *existing* Personalize project via `x-project-uid` — unlike
+Lytics, this API has no way to provision a disposable project per run.
+`PERSONALIZE_PROJECT_UID` must point at a real, existing project.
+
+**Undocumented discovery — `GET /projects` on the same host lists the org's
+projects, despite not being in the published OpenAPI spec.** Found live
+while looking for a way to obtain a project UID (there's no documented way
+to list Personalize projects anywhere). The QA org already had several
+existing projects when this was discovered, including a few with names like
+"Doc Personalize Project \*" and "Manage doc project \*" — apparent leftovers
+from an earlier, unrelated attempt at automating this same API. This
+pipeline reuses the project named **"Test"** (`698af1e39f7fc9b90d588622`)
+as the fixed `PERSONALIZE_PROJECT_UID`.
+
+**Test data lifecycle (full CRUD, live):** creates a disposable Attribute →
+Event → Audience (references the Attribute) → Experience → Experience
+Version (references the Audience + Event), exercises every list/get-by-id/
+update endpoint against them, updates Experiences Priority, reads Analytics,
+reads Geolocation (no project scope needed), then deletes everything in
+reverse dependency order. **Unlike Lytics, deletes here actually succeed**
+(confirmed `204` for all 5 resource types) — no repeat of the Lytics
+DELETE-403 permission gap.
+
+**Genuine business-rule responses (not bugs) baked into the lifecycle:**
+- Creating an Experience auto-provisions a single default DRAFT version.
+  Explicitly calling `Create an Experience Version` again therefore
+  correctly 400s (`CANNOT_CREATE_VERSION_AS_DRAFT_ALREADY_EXISTS`) — the
+  runner falls back to the auto-created version's UID for the rest of the
+  lifecycle so Update/Priority/Analytics/Delete still have something real.
+- `Delete an Experience Version` 400s (`CANNOT_DELETE_ONLY_DRAFT`) since an
+  experience must always have at least one version.
+- `Get Analytics Summary`/`Get Time-series Analytics` 404 (`SUMMARY_NOT_FOUND`
+  / `TIME_SERIES_ANALYTICS_NOT_FOUND`) since analytics only exist for
+  *activated* experiences with real traffic — a disposable draft never
+  qualifies.
+- **Minor doc gap found:** the OpenAPI spec's own `400` example responses for
+  `Create an Experience Version` and `Delete an Experience Version` don't
+  include these two error codes at all (they show different example errors
+  instead) — worth reporting, though low severity since the endpoints behave
+  correctly, just the example coverage is incomplete.
+- `Update Experiences Priority` requires the **full** set of the project's
+  existing experience UIDs, not just the newly created one — passing a
+  partial list 400s (`MISSING_EXPERIENCES`). Not clearly stated in the doc's
+  Sample Request (which only shows a single-UID example). On repeated runs
+  this can still 400 even with every currently-existing experience UID
+  included — possibly a stale/orphaned reference left behind by a
+  previously-deleted experience that's still tracked in the priority list;
+  needs the Personalize API team to confirm.
+- **Confirmed doc gaps — real response fields undocumented in the Sample
+  Request/Response:** `Update an Experience`'s OpenAPI request schema has a
+  `tags` field (array of strings, used for grouping/Edge delivery per the
+  spec's own tag description) that the doc's Sample Request doesn't show;
+  `Update an Experience Version`'s schema has a `targeting` field (audience
+  targeting config) missing from its Sample Request; and `Get a Single
+  Experience`'s live response includes a `description` field absent from the
+  doc's declared Sample Response. All three are genuine comparator findings,
+  not execution bugs.
+- **Known Try Out limitation:** the doc's live Try Out panel doesn't let this
+  automation edit the JSON request body — it always resends the doc's own
+  static Sample Request. Since Create endpoints (Attribute/Audience/Event/
+  Experience) use fixed sample values (e.g. `key: "age"`), repeated runs can
+  hit duplicate-key/name validation errors on the Try Out phase specifically
+  (the Swagger executor doesn't have this problem — it generates a fresh,
+  timestamped payload every run).
+
+These are recorded as real, honest execution results (same philosophy as
+Lytics' quota-limit handling), not hidden or special-cased away.
+
+**Region hosts:** same list shape as Lytics — `personalize-api.contentstack.com`
+(US), `eu-`/`au-`/`azure-na-`/`azure-eu-`/`gcp-na-`/`gcp-eu-` prefixes for
+other regions.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |

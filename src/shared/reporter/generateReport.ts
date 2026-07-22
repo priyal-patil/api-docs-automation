@@ -31,6 +31,7 @@ const API_FLAGS: Array<{ flag: string; label: string; suffix: string; noLiveTryO
   { flag: '--knowledgevault', label: 'Knowledge Vault', suffix: '-knowledgevault', noLiveTryOut: true },
   { flag: '--imagedelivery', label: 'Image Delivery', suffix: '-imagedelivery', noPostman: true },
   { flag: '--lytics',      label: 'Lytics',      suffix: '-lytics',      executorLabel: 'Swagger', executorDesc: 'OpenAPI Spec Execution' },
+  { flag: '--personalize', label: 'Personalize', suffix: '-personalize', executorLabel: 'Swagger', executorDesc: 'OpenAPI Spec Execution' },
 ];
 const activeApi     = API_FLAGS.find(a => process.argv.includes(a.flag));
 const API_LABEL     = activeApi?.label ?? 'CDA';
