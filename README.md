@@ -239,29 +239,51 @@ npm run compare:lytics  # doc params/headers/request body ↔ OpenAPI spec, + li
 npm run report:lytics   # → reports/run-report-lytics.html
 ```
 
-**Confirmed live bug — every documented endpoint 404s:** all 10 routes
-(`/projects`, `/projects/{id}`, `/projects/{id}/collaborators`,
-`/projects/{id}/roles`, etc.) return a genuine `404 Cannot GET/POST/PUT/
-DELETE ...` on the live host, despite being declared in that same host's own
-`/openapi` spec and rendered in the doc's Try Out panel. Confirmed three
-independent ways: direct axios calls to the bare path, the doc's own live
-"Open Builder" → Send Request panel (with real `authtoken`/
-`organization_uid` filled in), and by ruling out routing/auth issues
-(`/health` on the same host returns `200`, and the `/api-gateway` proxy path
-returns a *different* auth-shaped 401, confirming the app is up and
-selectively routing). The OpenAPI spec and the deployed service have fully
-diverged — this needs to be reported to whoever owns the Lytics API. Until
-it's fixed, every run of this pipeline will show all 10 requests failing.
+**Confirmed doc bug — `x-cs-api-version` is documented optional but is
+actually required for routing:** every one of the 10 endpoints initially
+appeared to 404 (`Cannot GET/POST/PUT/DELETE ...`) via direct API calls, the
+doc's own "Open Builder" panel, and this pipeline's first pass — a false
+alarm caused by all three omitting the `x-cs-api-version` header, which the
+doc documents as optional ("defaults to v1"). It isn't optional: omitting it
+returns a generic framework-level 404 before auth or routing logic ever
+runs; including it (`x-cs-api-version: 1`) routes correctly every time. This
+was only caught because the *actual* Swagger UI page (`/swagger`, distinct
+from the doc's "Open Builder" panel) silently defaults this header in for
+you, so requests made there succeeded (`201 Created`, with a real CDP
+account provisioned) while identical requests elsewhere 404'd. Confirmed by
+instrumenting `window.fetch` on the live Swagger UI page to capture the
+exact headers it sends, then replaying that exact request via direct axios
+— removing just the `x-cs-api-version` header reintroduced the 404, adding
+it back fixed it, reproducibly. **Report to the Lytics API team:** the doc's
+"defaults to v1" claim for `x-cs-api-version` is false — it should either
+actually default server-side when omitted (as documented) or be marked
+required.
+
+**Separate confirmed bug — `DELETE /projects/{id}` returns 403 for the
+project's own creator:** even with `x-cs-api-version` set, deleting a
+project returns `403 "Forbidden resource"` for the same org owner/admin
+account that created it (confirmed both via direct API call and the real
+Swagger UI's Execute button). This is not a header/routing issue — every
+other verb works fine for the same account. Possibly requires an OAuth
+`lytics:manage`-scoped bearer token rather than the `authtoken` header for
+delete specifically; unconfirmed, needs the Lytics API team to clarify.
+**Practical consequence:** this pipeline's own disposable test projects
+cannot reliably clean themselves up — check the org's Lytics project list
+periodically for accumulated `API Docs Automation Test *` / disposable
+projects and remove them manually (or via whatever credential does have
+delete permission) once the org's project quota is at risk of being hit
+(`lytics.PROJECTS.MAX_PROJECT_LIMIT_REACHED`).
 
 **Test data lifecycle:** creates a disposable project (`Create a project`),
 exercises Get/Update/List against it, invites `CS_QA_SECOND_EMAIL` as a
 collaborator (skipped with a "no-test-data" marker, not a false failure, if
 that secret isn't set), updates their role, then in a `finally` block
-removes the collaborator and deletes the project. Because Create currently
-404s and never returns a real project id, downstream calls proceed with a
-placeholder id (`unresolved-project-uid` for the Swagger executor,
-`test-project-uid` for the live Try Out spec) so every endpoint still gets
-an honest execution result instead of silently vanishing from the report.
+attempts to remove the collaborator and delete the project (expect the
+delete to 403 per the bug above). If Create fails for any reason (e.g. the
+quota bug), downstream calls proceed with a placeholder id
+(`unresolved-project-uid` for the Swagger executor, `test-project-uid` for
+the live Try Out spec) so every endpoint still gets an honest execution
+result instead of silently vanishing from the report.
 
 **Undocumented response shapes (confirmed live):** every 2xx response in the
 OpenAPI spec declares only a `description`, no `content`/schema — so the

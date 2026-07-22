@@ -191,10 +191,13 @@ async function scrapeModule(browser: Awaited<ReturnType<typeof chromium.launch>>
 
       // Unlike Analytics/Automations/Brand Kit/GenAI/Knowledge Vault, this doc's
       // "Open Builder" panel IS live — confirmed by manually filling real
-      // authtoken/organization_uid and clicking Send (got a real 404 back, not
-      // a canned response). bodyContent below is still the raw doc Sample
-      // Request text, used as a fallback baseline only if the live Try Out
-      // phase (tests/lytics/tryout-lytics.spec.ts) has no result for this request.
+      // authtoken/organization_uid and clicking Send. This panel does NOT send
+      // x-cs-api-version, which is documented optional but actually required
+      // for routing (see README "Lytics" section) — so it 404s unless that
+      // header is also filled in, same gotcha tests/lytics/tryout-lytics.spec.ts
+      // works around. bodyContent below is still the raw doc Sample Request
+      // text, used as a fallback baseline only if the live Try Out phase has
+      // no result for this request.
       const tryOut: TryOutData & { responseBodyKeys?: string[] } = {
         requestName: text,
         params: (doc.params as TryOutField[]).map(p => ({ name: p.name, type: p.type, defaultValue: p.defaultValue })),

@@ -134,7 +134,12 @@ export async function runSwaggerLytics(): Promise<NewmanResult[]> {
 
   console.log('\n🔑  Resolving authtoken...');
   const authtoken = await resolveAuthtoken();
-  const headers = { authtoken, organization_uid: ORG_UID };
+  // x-cs-api-version is documented as optional ("defaults to v1") but is
+  // actually REQUIRED for the request to route at all — confirmed live:
+  // omitting it 404s ("Cannot GET/POST/PUT/DELETE ...") before auth is even
+  // checked; the doc's own Swagger UI only "works" because it silently
+  // defaults this header in for you. See README "Lytics" section.
+  const headers = { authtoken, organization_uid: ORG_UID, 'x-cs-api-version': '1' };
 
   console.log('\n📥  Fetching live Lytics OpenAPI spec...');
   await fetchLyticsOpenApiSpec(BASE_HOST); // cached to reports/openapi-spec-lytics.json for compareLytics.ts
@@ -151,12 +156,12 @@ export async function runSwaggerLytics(): Promise<NewmanResult[]> {
       domain: `automation-test-${suffix}.example.com`,
       description: 'Disposable project created by api-docs-automation for live testing — safe to delete.',
     });
-    projectUid = pluckUid(created, ['id', 'uid', 'project_uid']);
-    // Don't abort the whole run if Create failed (e.g. the live host 404s on
-    // its own documented route — see README "Lytics" section) — keep firing
-    // the rest of the lifecycle against a placeholder id so every endpoint
-    // still gets a real, honest execution result (almost certainly another
-    // failure) instead of silently vanishing from the report.
+    projectUid = pluckUid(created, ['uid', 'id', 'project_uid']);
+    // Don't abort the whole run if Create failed (e.g. org project quota
+    // reached — confirmed live: lytics.PROJECTS.MAX_PROJECT_LIMIT_REACHED) —
+    // keep firing the rest of the lifecycle against a placeholder id so every
+    // endpoint still gets a real, honest execution result instead of
+    // silently vanishing from the report.
     if (!projectUid) {
       console.warn('   ⚠️  Create a project did not return a project id — continuing lifecycle with a placeholder id (downstream calls will very likely also fail)');
       projectUid = 'unresolved-project-uid';

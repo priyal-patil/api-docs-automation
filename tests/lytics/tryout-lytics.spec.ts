@@ -73,10 +73,8 @@ async function resolveAuthtoken(): Promise<string> {
  * One-time attempt to seed a real project/collaborator UID to fill into the
  * "id"/"userUid" path-param fields for the ID-dependent requests below — same
  * "fetch live, fall back to a placeholder" convention as CDA's globalSetup.ts.
- * At the time this was written, POST /projects itself 404s on the live host
- * (confirmed both via direct axios calls and via this exact doc panel — see
- * README "Lytics" section), so this will currently always fall through to the
- * placeholder — that's expected and NOT a bug in this spec; it's the finding.
+ * Requires x-cs-api-version — documented optional/defaulted, actually
+ * required for routing (see README "Lytics" section) — without it this 404s.
  */
 let seededProjectUid = 'test-project-uid';
 let seededUserUid = 'test-user-uid';
@@ -87,10 +85,10 @@ test.beforeAll(async () => {
     const res = await axios.post(`https://${BASE_HOST}/projects`, {
       name: `Tryout Seed ${Date.now()}`,
       domain: `tryout-seed-${Date.now()}.example.com`,
-    }, { headers: { authtoken, organization_uid: CS_ORG_UID, 'Content-Type': 'application/json' }, validateStatus: () => true });
-    const uid = res.data?.id ?? res.data?.uid;
+    }, { headers: { authtoken, organization_uid: CS_ORG_UID, 'x-cs-api-version': '1', 'Content-Type': 'application/json' }, validateStatus: () => true });
+    const uid = res.data?.uid ?? res.data?.id;
     if (uid) { seededProjectUid = uid; console.log(`✅  Seeded a real project ${uid} for ID-dependent Try Out tests`); }
-    else console.warn(`⚠️  Could not seed a real project (status ${res.status}) — ID-dependent Try Out tests will use a placeholder id and are expected to fail/404`);
+    else console.warn(`⚠️  Could not seed a real project (status ${res.status}: ${JSON.stringify(res.data)}) — ID-dependent Try Out tests will use a placeholder id and are expected to fail`);
   } catch (err) {
     console.warn(`⚠️  Could not seed a real project: ${(err as Error).message} — falling back to a placeholder id`);
   }
@@ -172,6 +170,12 @@ test.describe('Phase 2 — Lytics Live Try Out Panel Tests', () => {
       await fillParamField(page, 'organization_uid', CS_ORG_UID);
       await fillParamField(page, 'id', seededProjectUid);
       await fillParamField(page, 'userUid', seededUserUid);
+      // Documented as optional ("defaults to v1") but actually REQUIRED to
+      // route at all — confirmed live: omitting it 404s ("Cannot GET/POST/...")
+      // before auth is even checked. This doc panel does NOT auto-default it
+      // the way the real Swagger UI (/swagger) does, so it must be filled
+      // explicitly here. See README "Lytics" section.
+      await fillParamField(page, 'x-cs-api-version', '1');
 
       const sendBtn = page.locator('button.swaggerButton, button:has-text("Send Request")').first();
       const hasSendBtn = await sendBtn.isVisible({ timeout: 3000 }).catch(() => false);
@@ -194,7 +198,7 @@ test.describe('Phase 2 — Lytics Live Try Out Panel Tests', () => {
         flags.push(`❌  Server error: ${actualResponseCode}`);
         passed = false;
       } else if (actualResponseCode >= 400) {
-        flags.push(`❌  Client error: ${actualResponseCode} — live route may not exist despite being documented (see README "Lytics" section)`);
+        flags.push(`❌  Client error: ${actualResponseCode} — check credentials, required params, or org quota (see README "Lytics" section)`);
         passed = false;
       } else {
         flags.push(`✅  Response: ${actualResponseCode}`);
