@@ -1,0 +1,102 @@
+name: Contentstack Doc Automation — CMA Daily Run
+
+on:
+  schedule:
+    - cron: '30 22 * * *'   # 4:00 AM IST (IST = UTC+5:30, so 22:30 UTC the previous day) — same slot as every other product line
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+  push:
+    branches: [main]
+    paths:
+      - 'src/cma/**'
+      - 'src/shared/**'
+      - '.env.example'
+
+jobs:
+  run-cma-automation:
+    runs-on: ubuntu-latest
+    # CMA's own Newman run has historically been unreliable in the shared QA
+    # org due to unrelated stack churn (other automations/users create and
+    # delete stacks in the same org) — see .env's "CMA test stack —
+    # UNRESOLVED" note. A failure here may reflect that environment issue
+    # rather than a real doc/API problem — check the report before assuming
+    # a regression. Generous timeout until a real run confirms wall-clock time.
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << EOF
+          CS_API_KEY=${{ secrets.CS_API_KEY }}
+          CS_MANAGEMENT_TOKEN=${{ secrets.CS_MANAGEMENT_TOKEN }}
+          CS_DELIVERY_TOKEN=${{ secrets.CS_DELIVERY_TOKEN }}
+          CS_REGION=${{ secrets.CS_REGION || 'us' }}
+          POSTMAN_API_KEY=${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_CMA_COLLECTION_ID=${{ secrets.POSTMAN_CMA_COLLECTION_ID }}
+          CS_CMA_CONTENT_TYPE_UID=${{ secrets.CS_CMA_CONTENT_TYPE_UID }}
+          CS_CMA_ENVIRONMENT=${{ secrets.CS_CMA_ENVIRONMENT }}
+          CS_CMA_GLOBAL_FIELD_UID=${{ secrets.CS_CMA_GLOBAL_FIELD_UID }}
+          CS_CMA_TAXONOMY_UID=${{ secrets.CS_CMA_TAXONOMY_UID }}
+          CS_CMA_WORKFLOW_UID=${{ secrets.CS_CMA_WORKFLOW_UID }}
+          CS_CMA_ROLE_UID=${{ secrets.CS_CMA_ROLE_UID }}
+          CS_CMA_WEBHOOK_UID=${{ secrets.CS_CMA_WEBHOOK_UID }}
+          CS_CMA_LABEL_UID=${{ secrets.CS_CMA_LABEL_UID }}
+          CS_CMA_RELEASE_UID=${{ secrets.CS_CMA_RELEASE_UID }}
+          CS_CMA_EXTENSION_UID=${{ secrets.CS_CMA_EXTENSION_UID }}
+          SLACK_CHANNEL_EMAIL=${{ secrets.SLACK_CHANNEL_EMAIL }}
+          ALERT_FROM_EMAIL=${{ secrets.ALERT_FROM_EMAIL }}
+          ALERT_EMAIL_PASSWORD=${{ secrets.ALERT_EMAIL_PASSWORD }}
+          CMA_DOC_URL=https://www.contentstack.com/docs/developers/apis/content-management-api
+          EOF
+
+      - name: Phase 1 — Scrape Content Management API documentation
+        run: npm run scrape:cma
+        continue-on-error: true   # don't stop pipeline if scraping partially fails
+
+      - name: Phase 2 — Live Try Out tests
+        run: npm run tryout:cma
+        continue-on-error: true
+
+      - name: Phase 3a — Newman (run Postman collection requests)
+        run: npm run newman:cma
+        continue-on-error: true
+
+      - name: Phase 3b — Postman comparison (params + request/response body)
+        run: npm run compare:cma
+        continue-on-error: true
+
+      - name: Phase 4 — Generate report + send Slack report
+        run: npm run report:cma
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cma-doc-automation-report-${{ github.run_number }}
+          path: reports/run-report-cma.*
+          retention-days: 30
+
+      - name: Fail job if critical failures
+        run: |
+          node -e "
+            const r = require('./reports/run-report-cma.json');
+            if (r.failed > 0) {
+              console.error('❌ ' + r.failed + ' failure(s) detected');
+              process.exit(1);
+            }
+            console.log('✅ All checks passed');
+          "
