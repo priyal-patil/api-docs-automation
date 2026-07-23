@@ -433,6 +433,90 @@ Personalize Management doc-gap findings — none found here.
 `personalize-edge.contentstack.com` (US), `eu-`/`au-`/`azure-na-`/
 `azure-eu-`/`gcp-na-`/`gcp-eu-` prefixes for other regions.
 
+## Launch API
+
+Same no-Postman/live-OpenAPI-spec/live-Try-Out shape as Lytics/Personalize
+(22 endpoints across 7 modules: Projects, Environments, File Upload,
+Deployments, Deployment Logs, Launch Product Analytics, Server Logs), but
+with a fundamentally different risk profile: **Launch resources are real
+infrastructure, not just data records.** Creating a Project + Environment
+triggers a genuine build and deploys a live hosted site.
+
+```bash
+npm run launch          # scrape → tryout → swagger execution → compare → report, end-to-end
+
+npm run scrape:launch   # scrape all 21 documented endpoints (spec has a 22nd, undocumented — see Coverage below)
+npm run tryout:launch   # live Try Out panel tests against a reused, fixed project/environment/deployment
+npm run swagger:launch  # reads against the reused fixtures + a real disposable project create/update/delete lifecycle
+npm run compare:launch  # doc params/headers/request body ↔ OpenAPI spec, + live response ↔ doc Sample Response
+npm run report:launch   # → reports/run-report-launch.html
+```
+
+**Reused-fixture design (deliberate, not a workaround):** the QA org already
+had 3 leftover Launch projects from an earlier, unrelated automation/testing
+effort (`Auto Launch File Upload ef48b`/`736d0`, `Auto Launch Project
+f6737`) — one of which has 15 leftover environments and a completed (`LIVE`)
+deployment with real logs. Rather than creating a new project + waiting for
+a real build on every run (Launch builds can take minutes), this pipeline
+**reuses that existing project/environment/deployment** (hardcoded UIDs in
+`runSwaggerLaunch.ts`, not env vars — they're fixed QA-org fixtures, not
+rotatable config) for every read-heavy check: Get all/one Project, Get
+all/one Environment, Get all/one Deployment, Deployment Logs, Server Logs,
+signed-upload/download URLs, and cache-revalidation usage.
+
+**Real disposable lifecycle — only for Create/Update/Delete:** every run
+performs an actual, real file-upload project creation: `GET` a signed S3
+POST URL → build a minimal valid ZIP in-memory (hand-rolled STORE-method ZIP
+writer, no archiver dependency needed — confirmed the S3 policy requires
+≥1KB, so the ZIP is padded) → multipart-POST it to the signed URL with
+native `FormData`/`Blob` → `POST /projects` referencing the returned
+`uploadUid`, with a nested `environment` object (Launch auto-creates the
+project's first environment from this, confirmed live) → `Update a Project`
+→ `Update an Environment` on that auto-created environment → `finally`:
+`Delete an Environment` then `Delete a Project`. **Deletes succeed cleanly
+here** (`204` for both, confirmed live) — no repeat of the Lytics DELETE-403
+gap. Verified after a real run that the org's project list returns to
+exactly the original 3 leftover projects — no orphans left behind.
+
+**Deliberately NOT exercised live — `Create a Deployment`:** creating a new
+deployment (even on the disposable project) would trigger a real,
+multi-minute build. Marked as an explicit, documented skip
+(`callSkipped()`), not silently omitted — the Deployments module's read
+endpoints are still fully covered via the reused, already-completed
+deployment.
+
+**Confirmed genuine finding — `Get Server Logs` returns `500`:** for the
+reused (and the disposable) `FILEUPLOAD`/static deployment, Server Logs
+consistently 500s (`Internal server error`), while Deployment Logs works
+fine (`200`, real build-step logs). Plausible explanation: server logs only
+apply to SSR/server-rendered frameworks that run an actual server process —
+a static file-upload deployment has none. Recorded honestly as a real
+result, not special-cased away; would need the Launch team to confirm
+whether this should instead be a clean `404`/documented "not applicable"
+response for static deployments rather than a `500`.
+
+**Checked explicitly for the Lytics `x-cs-api-version` gotcha — found
+clean:** this API also documents `x-cs-api-version` as optional, but
+confirmed live (with and without the header) that both work identically —
+no hidden requirement here.
+
+**Coverage gap noted, not investigated further:** the OpenAPI spec declares
+a `PATCH /projects/{project_uid}/git-repository` operation with no
+`summary` and no corresponding doc page — surfaces as a normal
+`missing_in_doc` comparator finding.
+
+**Known lifecycle gap — standalone `Create an Environment`:** the executor
+only ever creates an environment as an implicit side effect of `Create a
+Project` (Launch auto-provisions the project's first environment from the
+nested `environment` object) — the standalone `POST /projects/{project_uid}/
+environments` endpoint (for adding a *second* environment to an existing
+project) is never called directly, so it has no live execution result and
+shows up as a comparator warning rather than a pass/fail.
+
+**Region hosts:** confirmed from the doc's own "Base URLs" table —
+`launch-api.contentstack.com` (US), with `eu-`/`au-`/`azure-na-`/
+`azure-eu-`/`gcp-na-`/`gcp-eu-` prefixes for other regions.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |

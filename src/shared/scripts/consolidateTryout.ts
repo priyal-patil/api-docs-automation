@@ -29,6 +29,7 @@ const PRODUCTS: Record<string, { dir: string; suffix: string; label: string }> =
   lytics:          { dir: 'individual-lytics',          suffix: '-lytics',          label: 'Lytics' },
   personalize:     { dir: 'individual-personalize',     suffix: '-personalize',     label: 'Personalize' },
   personalizeedge: { dir: 'individual-personalizeedge', suffix: '-personalizeedge', label: 'Personalize Edge' },
+  launch:          { dir: 'individual-launch',          suffix: '-launch',          label: 'Launch' },
 };
 
 const product = target ? PRODUCTS[target] : undefined;
