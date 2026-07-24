@@ -1,0 +1,89 @@
+name: Contentstack Doc Automation — GraphQL Daily Run
+
+on:
+  schedule:
+    - cron: '30 22 * * *'   # 4:00 AM IST (IST = UTC+5:30, so 22:30 UTC the previous day) — same slot as every other product line
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+  push:
+    branches: [main]
+    paths:
+      - 'src/graphql/**'
+      - 'src/shared/**'
+      - '.env.example'
+
+jobs:
+  run-graphql-automation:
+    runs-on: ubuntu-latest
+    # 90 examples, each with a real browser-driven GraphiQL Explorer Try Out
+    # session — generous timeout until a real run confirms wall-clock time.
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << EOF
+          POSTMAN_API_KEY=${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_GRAPHQL_COLLECTION_ID=${{ secrets.POSTMAN_GRAPHQL_COLLECTION_ID }}
+          SLACK_CHANNEL_EMAIL=${{ secrets.SLACK_CHANNEL_EMAIL }}
+          ALERT_FROM_EMAIL=${{ secrets.ALERT_FROM_EMAIL }}
+          ALERT_EMAIL_PASSWORD=${{ secrets.ALERT_EMAIL_PASSWORD }}
+          GRAPHQL_DOC_URL=https://www.contentstack.com/docs/developers/apis/graphql-content-delivery-api
+          EOF
+          # Deliberately NO CS_API_KEY/CS_DELIVERY_TOKEN — this product line
+          # uses Contentstack's own public sample-stack credentials, hardcoded
+          # in runNewmanGraphQL.ts/tryout-graphql.spec.ts (confirmed live to
+          # work; our own QA stack lacks the required content model). See
+          # README "GraphQL" section.
+
+      - name: Phase 1 — Scrape GraphQL Content Delivery API documentation
+        run: npm run scrape:graphql
+        continue-on-error: true   # don't stop pipeline if scraping partially fails
+
+      - name: Phase 2 — Live Try Out tests (GraphiQL Explorer, 90 examples)
+        run: npm run tryout:graphql
+        continue-on-error: true
+
+      - name: Phase 3a — Newman (run Postman collection requests against the sample stack)
+        run: npm run newman:graphql
+        continue-on-error: true
+
+      - name: Phase 3b — Doc ↔ Postman comparison (query field sets + response bodies)
+        run: npm run compare:graphql
+        continue-on-error: true
+
+      - name: Phase 4 — Generate report + send Slack report
+        run: npm run report:graphql
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: graphql-doc-automation-report-${{ github.run_number }}
+          path: reports/run-report-graphql.*
+          retention-days: 30
+
+      - name: Fail job if critical failures
+        run: |
+          node -e "
+            const r = require('./reports/run-report-graphql.json');
+            if (r.failed > 0) {
+              console.error('❌ ' + r.failed + ' failure(s) detected');
+              process.exit(1);
+            }
+            console.log('✅ All checks passed');
+          "

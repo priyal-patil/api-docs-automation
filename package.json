@@ -82,6 +82,13 @@
     "report:launch": "ts-node src/shared/reporter/generateReport.ts --launch",
     "launch": "npm run scrape:launch && npm run tryout:launch && npm run swagger:launch && npm run compare:launch && npm run report:launch",
 
+    "scrape:graphql": "ts-node src/graphql/scraper/scrapeAllGraphQL.ts",
+    "tryout:graphql": "playwright test tests/graphql/tryout-graphql.spec.ts --reporter=html ; ts-node src/shared/scripts/consolidateTryout.ts graphql",
+    "newman:graphql": "ts-node src/graphql/postman/runNewmanGraphQL.ts",
+    "compare:graphql": "ts-node src/graphql/postman/compareGraphQL.ts",
+    "report:graphql": "ts-node src/shared/reporter/generateReport.ts --graphql",
+    "graphql": "npm run scrape:graphql && npm run tryout:graphql && npm run newman:graphql && npm run compare:graphql && npm run report:graphql",
+
     "test": "playwright test"
   },
   "dependencies": {

@@ -30,6 +30,7 @@ const PRODUCTS: Record<string, { dir: string; suffix: string; label: string }> =
   personalize:     { dir: 'individual-personalize',     suffix: '-personalize',     label: 'Personalize' },
   personalizeedge: { dir: 'individual-personalizeedge', suffix: '-personalizeedge', label: 'Personalize Edge' },
   launch:          { dir: 'individual-launch',          suffix: '-launch',          label: 'Launch' },
+  graphql:         { dir: 'individual-graphql',         suffix: '-graphql',         label: 'GraphQL' },
 };
 
 const product = target ? PRODUCTS[target] : undefined;

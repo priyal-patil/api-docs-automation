@@ -517,6 +517,79 @@ shows up as a comparator warning rather than a pass/fail.
 `launch-api.contentstack.com` (US), with `eu-`/`au-`/`azure-na-`/
 `azure-eu-`/`gcp-na-`/`gcp-eu-` prefixes for other regions.
 
+## GraphQL Content Delivery API
+
+Real Postman collection this time (`POSTMAN_GRAPHQL_COLLECTION_ID`, 90
+requests), so this is the **CMA-style** pipeline (scrape → live Try Out →
+Newman → 3-way compare → report), not the Swagger-executor pattern. Two
+things make it structurally different from every other product line:
+
+**The "Try Out" is a real embedded GraphiQL IDE, not the standard param
+panel.** Each of the 90 examples' "Open Builder" link opens (in a new tab)
+`/graphql-content-delivery-api/explorer/?title=<QueryName>` — confirmed live
+via its standard GraphiQL ARIA labels (`Execute query (Cmd-Enter)`, class
+`graphiql-execute-button`). It has 3 tabs (URL Parameters / Headers / Query
+Parameters) with an Apply button, then the GraphiQL editor itself
+pre-loaded with that example's query.
+
+**Uses Contentstack's own public sample e-commerce stack, not our QA
+stack — per explicit instruction, confirmed live.** The Explorer ships with
+real, working default credentials pre-filled (`api_key: blt02f7b45378b008ee`,
+`access_token: cs5b69faf35efdebd91d08bcf4`, `environment: production`) —
+clicking Execute with zero configuration returns genuine sample data (e.g.
+`"iPhone 7 128GB"`). Our own QA stack was tried first and ruled out: it has
+no environment, no delivery token, and none of the `product`/`category`/
+`article`/etc. content types these 90 examples query against (GraphQL types
+are generated live from a stack's actual content model). `runNewmanGraphQL.ts`
+and `tryout-graphql.spec.ts` both hardcode these sample-stack credentials —
+not `CS_API_KEY`/`CS_DELIVERY_TOKEN` — so **no new secrets are needed**
+beyond the Postman collection ID.
+
+```bash
+npm run graphql          # scrape → tryout → newman → compare → report, end-to-end
+
+npm run scrape:graphql   # scrape all 90 examples across 4 modules (Queries, Retrieving Referenced Entries or Assets, Query Operators, Image Transformations)
+npm run tryout:graphql   # live Try Out — navigate the Explorer, click Execute directly (defaults already work), capture the real response
+npm run newman:graphql   # run all 90 Postman requests live against the sample stack
+npm run compare:graphql  # doc query fields ↔ Postman query fields, + live Try Out response ↔ live Newman response
+npm run report:graphql   # → reports/run-report-graphql.html
+```
+
+**Response capture had to route around canvas rendering.** The Explorer's
+response panel is a Monaco editor rendered via `<canvas>` (confirmed live —
+real `innerHTML`, but empty `textContent`/`.view-lines`, so DOM-scraping the
+rendered response is unreliable). Both `tryout-graphql.spec.ts` and the
+manual investigation instead instrument `window.fetch` (via
+`page.addInitScript`, active from first paint) and read the real captured
+network response directly — more robust than scraping the editor anyway,
+since it's the actual API response, not a re-render of it.
+
+**Confirmed doc/collection discrepancy — `x-cs-variant-uid` default state
+differs:** the Explorer's Headers tab has this header **enabled by default**
+with a real sample value for every request, but the Postman collection ships
+it **disabled by default** on every request — including the two
+("Get Entry List with Variants", "Get Single Entry with Variant") whose own
+header description says it's required. `runNewmanGraphQL.ts` re-enables it
+only for those two (`enableVariantHeaderForVariantRequests()`), same
+"fix a known disabled-header issue" pattern as every other Newman runner in
+this repo — but the underlying doc/Postman inconsistency is itself worth
+reporting upstream.
+
+**Scraper adapted for prose-style docs, not structured param tables.**
+Unlike every REST product line, these 4 doc modules are prose + code
+examples with no `Headers`/`URL Parameters` bullet lists per request — so
+`scrapeAllGraphQL.ts` extracts (title, nearest GraphQL query code block)
+pairs via the same flattened-DOM + nearest-heading/nearest-`<pre>` approach
+used elsewhere, rather than structured `DocParam` rows. The comparator
+correspondingly diffs **query field/argument sets** (via a lightweight
+tokenizer, `extractGraphQLFields()` — not a full GraphQL parser, deliberately
+"good enough" like this repo's existing JSON `extractKeys()` helper) instead
+of REST params/headers.
+
+**Coverage note:** 90 examples scraped vs 89 Postman requests — one doc
+example has no Postman counterpart (or vice versa); surfaces as a normal
+comparator coverage finding rather than being silently reconciled.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |
