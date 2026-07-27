@@ -94,6 +94,11 @@
     "report:administration": "ts-node src/shared/reporter/generateReport.ts --administration",
     "administration": "npm run scrape:administration && npm run compare:administration && npm run report:administration",
 
+    "scrape:scim": "ts-node src/scim/scraper/scrapeAllSCIM.ts",
+    "compare:scim": "ts-node src/scim/compareSCIM.ts",
+    "report:scim": "ts-node src/shared/reporter/generateReport.ts --scim",
+    "scim": "npm run scrape:scim && npm run compare:scim && npm run report:scim",
+
     "test": "playwright test"
   },
   "dependencies": {

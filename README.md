@@ -634,6 +634,46 @@ completely undocumented in the doc's own Parameters section — including a
 casing inconsistency (`include_user_details` vs `includeUserDetails` for
 what's presumably the same parameter across two Teams endpoints).
 
+## SCIM API
+
+Same static-only, 2-way pipeline as Administration API (no Postman
+collection, no Send/Execute button on the Try Out panel — confirmed live)
+across all 3 modules (Users, Groups, Schema Discovery, 19 requests total).
+`scrapeAllSCIM.ts`/`compareSCIM.ts` are near-verbatim copies of the
+Administration ones, with SCIM's own header set (`Authorization`,
+`Content-Type` — `organization_uid`/`user_id`/`group_id` are URL **path**
+parameters here, not headers, unlike Administration API's `organization_uid`
+which is sent as a header).
+
+```bash
+npm run scim          # scrape → compare → report, end-to-end
+
+npm run scrape:scim   # scrape doc params/headers AND the Try Out panel's fields across all 3 modules
+npm run compare:scim  # doc description ↔ Try Out panel — param/header field gaps only
+npm run report:scim   # → reports/run-report-scim.html
+```
+
+**Found and fixed a real duplicate-DOM bug in the shared section-scoping
+logic.** This doc page renders up to 4 duplicate copies of each section in
+the DOM (confirmed live on "Replace Users in Group" — responsive layout
+variants), all with their own `<h2>`, unlike CMA/Administration where usually
+only one copy did. The inherited "prefer the candidate with an h2" rule
+picked whichever copy happened to be first — silently landing on a **hidden**
+one for that request and returning empty params/headers (surfaced as a false
+`fail`: "doc describes organization_uid/group_id but they're not in the Try
+Out panel"). Fixed by requiring the chosen candidate to be both visible
+(`offsetParent !== null`) *and* have an `h2`, falling back to h2-only, then
+the last candidate — only applied to `scrapeAllSCIM.ts` so far; the same
+latent bug likely affects CMA/Administration/GraphQL scrapers too if any of
+their sections ever render more than one visible-h2 duplicate, worth
+revisiting.
+
+**Confirmed real findings:** 5 of 19 requests have query parameters shown
+live in the Try Out panel (`count`/`startIndex` on "Get All Users"/"Get All
+Groups", `filter` on the two "by name" lookups, `excludedAttributes` on
+Groups) that are completely undocumented in the doc's own Parameters section
+— standard SCIM 2.0 protocol parameters the doc simply never mentions.
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |
