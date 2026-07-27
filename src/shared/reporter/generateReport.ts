@@ -35,6 +35,7 @@ const API_FLAGS: Array<{ flag: string; label: string; suffix: string; noLiveTryO
   { flag: '--personalizeedge', label: 'Personalize Edge', suffix: '-personalizeedge', executorLabel: 'Swagger', executorDesc: 'OpenAPI Spec Execution' },
   { flag: '--launch', label: 'Launch', suffix: '-launch', executorLabel: 'Swagger', executorDesc: 'OpenAPI Spec Execution' },
   { flag: '--graphql', label: 'GraphQL', suffix: '-graphql' },
+  { flag: '--administration', label: 'Administration', suffix: '-administration', noLiveTryOut: true, noPostman: true },
 ];
 const activeApi     = API_FLAGS.find(a => process.argv.includes(a.flag));
 const API_LABEL     = activeApi?.label ?? 'CDA';

@@ -590,6 +590,50 @@ of REST params/headers.
 example has no Postman counterpart (or vice versa); surfaces as a normal
 comparator coverage finding rather than being silently reconciled.
 
+## Administration API
+
+No Postman collection, and confirmed live that the doc's Try Out panel has
+**no Send/Execute button at all** — clicking "Open Builder" just expands an
+inline panel (not a new tab) showing the request's Headers/Query
+Parameters/Body with their default values, purely for reference. There is
+nothing to execute and nothing to compare against a collection, so this
+product line is a **2-way, static-only** pipeline: scrape → compare → report
+— no live Try Out phase, no Newman, no disposable test data, no auth
+required at all.
+
+```bash
+npm run administration          # scrape → compare → report, end-to-end
+
+npm run scrape:administration   # scrape doc params/headers AND the Try Out panel's fields across all 4 modules (User Session, Users, Organizations, Teams)
+npm run compare:administration  # doc description ↔ Try Out panel — param/header field gaps only
+npm run report:administration   # → reports/run-report-administration.html
+```
+
+**The Try Out panel's fields are read statically, never executed.**
+`extractTryOut()` in `scrapeAllAdministration.ts` clicks "Open Builder",
+waits for render, then reads every `input[data-param-key]`'s pre-filled
+default value directly — the same technique CMA's scraper already uses to
+read the panel, just without CMA's separate live-execution phase (Apply +
+Send), which doesn't exist here.
+
+**Method/endpoint extraction needed its own section-scoped fix.** Unlike CMA,
+this doc page's method badge and endpoint URL are plain `<span>`/`<code>`
+elements with no distinguishing class (confirmed live — just Tailwind utility
+classes like `bg-docs-green-5`). An unscoped page-wide query always matched
+the FIRST request on the page, silently mislabeling every other request's
+method as the page's first one (e.g. "Update a team" showing as `GET`
+instead of `PUT`, with an empty endpoint). Fixed by bounding the search to
+each request's own section — the same heading-to-next-heading scoping
+`extractParams`/`extractHeaders` already use.
+
+**Confirmed real findings from the 3-way... well, 2-way check:** 3 of 31
+requests have query parameters shown live in the Try Out panel
+(`include_user_details` on "Get a single team"/"Update a team",
+`includeUserDetails` + `include_count` on "Get all users of team") that are
+completely undocumented in the doc's own Parameters section — including a
+casing inconsistency (`include_user_details` vs `includeUserDetails` for
+what's presumably the same parameter across two Teams endpoints).
+
 ## Required Secrets (GitHub Actions)
 
 | Secret | Description |

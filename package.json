@@ -89,6 +89,11 @@
     "report:graphql": "ts-node src/shared/reporter/generateReport.ts --graphql",
     "graphql": "npm run scrape:graphql && npm run tryout:graphql && npm run newman:graphql && npm run compare:graphql && npm run report:graphql",
 
+    "scrape:administration": "ts-node src/administration/scraper/scrapeAllAdministration.ts",
+    "compare:administration": "ts-node src/administration/compareAdministration.ts",
+    "report:administration": "ts-node src/shared/reporter/generateReport.ts --administration",
+    "administration": "npm run scrape:administration && npm run compare:administration && npm run report:administration",
+
     "test": "playwright test"
   },
   "dependencies": {

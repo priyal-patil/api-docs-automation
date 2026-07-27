@@ -1,0 +1,79 @@
+name: Contentstack Doc Automation — Administration API Daily Run
+
+on:
+  schedule:
+    - cron: '30 22 * * *'   # 4:00 AM IST (IST = UTC+5:30, so 22:30 UTC the previous day) — same slot as every other product line
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+  push:
+    branches: [main]
+    paths:
+      - 'src/administration/**'
+      - 'src/shared/**'
+      - '.env.example'
+
+jobs:
+  run-administration-automation:
+    runs-on: ubuntu-latest
+    # Only 31 requests and no live browser execution (no Send button on this
+    # doc's Try Out panel, no Postman collection) — a plain scrape + compare,
+    # much lighter than every other product line.
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << EOF
+          SLACK_CHANNEL_EMAIL=${{ secrets.SLACK_CHANNEL_EMAIL }}
+          ALERT_FROM_EMAIL=${{ secrets.ALERT_FROM_EMAIL }}
+          ALERT_EMAIL_PASSWORD=${{ secrets.ALERT_EMAIL_PASSWORD }}
+          ADMINISTRATION_DOC_URL=https://www.contentstack.com/docs/developers/apis/administration-api
+          EOF
+          # No CS_API_KEY/POSTMAN_* secrets at all — this product line has no
+          # Postman collection and its Try Out panel has no Send/Execute
+          # button (confirmed live), so it's a pure static doc-description
+          # ↔ Try-Out-panel comparison. See README "Administration API" section.
+
+      - name: Phase 1 — Scrape Administration API documentation (doc params + Try Out panel fields)
+        run: npm run scrape:administration
+        continue-on-error: true   # don't stop pipeline if scraping partially fails
+
+      - name: Phase 2 — Doc ↔ Try Out panel comparison (param/header field gaps)
+        run: npm run compare:administration
+        continue-on-error: true
+
+      - name: Phase 3 — Generate report + send Slack report
+        run: npm run report:administration
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: administration-doc-automation-report-${{ github.run_number }}
+          path: reports/run-report-administration.*
+          retention-days: 30
+
+      - name: Fail job if critical failures
+        run: |
+          node -e "
+            const r = require('./reports/run-report-administration.json');
+            if (r.failed > 0) {
+              console.error('❌ ' + r.failed + ' failure(s) detected');
+              process.exit(1);
+            }
+            console.log('✅ All checks passed');
+          "
