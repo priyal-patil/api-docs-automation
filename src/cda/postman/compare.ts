@@ -78,13 +78,15 @@ export async function runComparison(): Promise<ComparisonResult[]> {
       name: f.name, type: f.type, required: false, description: '',
     }));
 
-    const docParamNames    = new Set(effectiveDocParams.map(p => norm(p.name)));
-    const tryOutParamNames = new Set(tryOut.params.map(p => norm(p.name)));
+    const docParamNames     = new Set(effectiveDocParams.map(p => norm(p.name)));
+    const tryOutParamNames  = new Set(tryOut.params.map(p => norm(p.name)));
+    const docHeaderNames    = new Set(doc.headers.map(h => norm(h.name)));
+    const tryOutHeaderNames = new Set(tryOut.headers.map(h => norm(h.name)));
 
     // Only compare Doc ↔ Try Out when the scraper found actual doc tables
     if (doc.params.length > 0) {
       for (const p of doc.params) {
-        if (!tryOutParamNames.has(norm(p.name))) {
+        if (!tryOutParamNames.has(norm(p.name)) && !tryOutHeaderNames.has(norm(p.name))) {
           mismatches.push({
             type: 'missing_in_tryout', field: p.name,
             source: 'Doc → Try Out',
@@ -94,7 +96,7 @@ export async function runComparison(): Promise<ComparisonResult[]> {
         }
       }
       for (const f of tryOut.params) {
-        if (!docParamNames.has(norm(f.name))) {
+        if (!docParamNames.has(norm(f.name)) && !docHeaderNames.has(norm(f.name))) {
           mismatches.push({
             type: 'extra_in_tryout', field: f.name,
             source: 'Try Out → Doc',
@@ -123,9 +125,13 @@ export async function runComparison(): Promise<ComparisonResult[]> {
         Array.from((postmanReq.url ?? '').matchAll(/\{\{(\w+)\}\}/g)).map(m => norm(m[1]))
       );
 
-      // Postman active params missing from doc/tryout (only flag actively-sent params)
+      // Postman active params missing from doc/tryout (only flag actively-sent params).
+      // Cross-check headers too — a param in Postman can be documented as a header
+      // in the doc/Try Out panel (e.g. organization_uid) without being a real gap.
       for (const p of postmanReq.params.filter(p => !p.disabled)) {
-        if (!docParamNames.has(norm(p.key)) && !tryOutParamNames.has(norm(p.key))) {
+        const n = norm(p.key);
+        if (!docParamNames.has(n) && !tryOutParamNames.has(n)
+            && !docHeaderNames.has(n) && !tryOutHeaderNames.has(n)) {
           mismatches.push({
             type: 'missing_in_doc', field: p.key,
             source: 'Postman → Doc/Try Out',
@@ -152,7 +158,6 @@ export async function runComparison(): Promise<ComparisonResult[]> {
         'apikey', 'accesstoken', 'deliverytoken', 'authtoken', 'managementtoken',
         'contenttype', 'branch', 'authorization', 'xcsvariantuid',
       ]);
-      const docHeaderNames     = new Set(doc.headers.map(h => norm(h.name)));
       const postmanHeaderNames = new Set(postmanReq.headers.map(h => norm(h.key)));
       for (const h of postmanReq.headers) {
         if (GLOBAL_HEADERS.has(norm(h.key))) continue;
@@ -272,12 +277,13 @@ export async function runComparison(): Promise<ComparisonResult[]> {
       // Newman execution failure
       if (!newmanResult.passed) {
         const isNoTestData = newmanResult.error?.includes('Unresolved variable');
+        const apiError = extractApiError(newmanResult.responseBodyRaw);
         mismatches.push({
           type: 'newman_failure',
           source: 'Postman (Newman)',
           detail: isNoTestData
             ? `Postman request returned ${newmanResult.responseCode} — URL has unresolved {{variable}} (no test data for this UID)`
-            : `Postman request returned ${newmanResult.responseCode}${newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
+            : `Postman request returned ${newmanResult.responseCode}${apiError ? ` — ${apiError}` : newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
           severity: isNoTestData ? 'warning' : 'error',
         });
       }
@@ -293,12 +299,13 @@ export async function runComparison(): Promise<ComparisonResult[]> {
     // Newman failure check when there is no tryOutResult (handles cases not caught above)
     if (newmanResult && !tryOutResult && !newmanResult.passed) {
       const isNoTestData = newmanResult.error?.includes('Unresolved variable');
+      const apiError = extractApiError(newmanResult.responseBodyRaw);
       mismatches.push({
         type: 'newman_failure',
         source: 'Postman (Newman)',
         detail: isNoTestData
           ? `Postman request returned ${newmanResult.responseCode} — URL has unresolved {{variable}} (no test data for this UID)`
-          : `Postman request returned ${newmanResult.responseCode}${newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
+          : `Postman request returned ${newmanResult.responseCode}${apiError ? ` — ${apiError}` : newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
         severity: isNoTestData ? 'warning' : 'error',
       });
     }
@@ -384,6 +391,24 @@ function findByName<T>(
       })
     // 3. Same words in any order (catches "Equals Within Group Operator" vs "Equals Operator Within Group")
     ?? list.find(item => sortedWords(getName(item)) === targetSorted);
+}
+
+// Pull the actual API error message/code out of a Newman response body so the
+// report is self-explanatory instead of just "returned 422".
+function extractApiError(raw: string | undefined): string | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw.trim());
+    const parts: string[] = [];
+    if (parsed.error_message) parts.push(parsed.error_message);
+    if (parsed.errors && typeof parsed.errors === 'object') {
+      for (const [field, msgs] of Object.entries(parsed.errors)) {
+        const msgText = Array.isArray(msgs) ? msgs.join(', ') : String(msgs);
+        parts.push(`${field}: ${msgText}`);
+      }
+    }
+    return parts.length ? parts.join(' — ') : undefined;
+  } catch { return undefined; }
 }
 
 function extractKeys(raw: string | undefined | null): string[] | undefined {

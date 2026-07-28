@@ -37,7 +37,7 @@ async function extractMethodAndEndpoint(page: Page, anchorId: string): Promise<{
     const all = Array.from(document.querySelectorAll('body *'));
     const candidates = Array.from(document.querySelectorAll(`[id="${id}"]`));
     const anchorEl = candidates.length > 1
-      ? (candidates.find(el => el.querySelector('h2')) ?? candidates[candidates.length - 1])
+      ? (candidates.find(el => el.querySelector('h2') && (el as HTMLElement).offsetParent !== null) ?? candidates.find(el => el.querySelector('h2')) ?? candidates[candidates.length - 1])
       : candidates[0];
     let scoped: Element[] = all;
     if (anchorEl) {
@@ -70,7 +70,7 @@ async function extractParams(page: Page, anchorId: string): Promise<DocParam[]> 
       const all = Array.from(document.querySelectorAll('body *'));
       const candidates = Array.from(document.querySelectorAll(`[id="${id}"]`));
       const anchorEl = candidates.length > 1
-        ? (candidates.find(el => el.querySelector('h2')) ?? candidates[candidates.length - 1])
+        ? (candidates.find(el => el.querySelector('h2') && (el as HTMLElement).offsetParent !== null) ?? candidates.find(el => el.querySelector('h2')) ?? candidates[candidates.length - 1])
         : candidates[0];
       if (!anchorEl) return all;
       const startIdx = all.indexOf(anchorEl);

@@ -54,6 +54,10 @@ async function scrapeModule(module: string, skipAnchors: string[]): Promise<Scra
           const text = (a as HTMLElement).innerText?.trim();
           if (!href || seen.has(href) || !text || text.length < 4 || text.length > 80) return;
           if (skip.includes(href)) return;
+          // Skip cross-reference anchors that don't resolve on THIS page — see
+          // the CMA scraper's identical fix for why (dead anchors otherwise
+          // trigger the section-scoping fallback to scan the whole page).
+          if (!document.getElementById(href.slice(1))) return;
           seen.add(href);
           found.push({ href, text });
         });
@@ -194,14 +198,21 @@ async function extractEndpoint(page: Page): Promise<string> {
 async function extractParams(page: Page, anchorId: string): Promise<DocParam[]> {
   return page.evaluate((id: string): DocParam[] => {
     const result: DocParam[] = [];
-    const HEADER_KEYS = new Set(['api_key', 'access_token', 'delivery_token', 'management_token', 'branch', 'authorization', 'authtoken', 'x-cs-variant-uid']);
+    const HEADER_KEYS = new Set(['api_key', 'access_token', 'delivery_token', 'management_token', 'branch', 'authorization', 'authtoken', 'x-cs-variant-uid', 'organization_uid']);
 
     // Bound this request's own section: from its heading up to (but not including)
     // the next heading. Doc pages list every request in a module on ONE page, so an
     // unscoped table/div query can grab a DIFFERENT request's table entirely.
     function sectionElements(): Element[] {
       const all = Array.from(document.querySelectorAll('body *'));
-      const anchorEl = document.getElementById(id);
+      // Some doc pages reuse the SAME id twice: once as a small "up next"
+      // preview heading (h5) embedded near the end of the PRECEDING section,
+      // and once as the real h2 section further down. getElementById always
+      // returns the FIRST match (the preview) — prefer the real h2 instead.
+      const idCandidates = Array.from(document.querySelectorAll(`[id="${id}"]`));
+      const anchorEl = idCandidates.length > 1
+        ? (idCandidates.find(el => el.querySelector('h2')) ?? idCandidates[idCandidates.length - 1])
+        : idCandidates[0];
       if (!anchorEl) return all;
       const startIdx = all.indexOf(anchorEl);
       if (startIdx === -1) return all;
@@ -295,9 +306,13 @@ async function extractHeaders(page: Page, anchorId: string): Promise<DocHeader[]
   return page.evaluate((id: string): DocHeader[] => {
     const result: DocHeader[] = [];
 
-    // Same section-scoping as extractParams — see comment there.
+    // Same section-scoping as extractParams — see comment there, including the
+    // duplicate-id "preview heading" fix (prefer the real h2 section).
     const all = Array.from(document.querySelectorAll('body *'));
-    const anchorEl = document.getElementById(id);
+    const idCandidates = Array.from(document.querySelectorAll(`[id="${id}"]`));
+    const anchorEl = idCandidates.length > 1
+      ? (idCandidates.find(el => el.querySelector('h2')) ?? idCandidates[idCandidates.length - 1])
+      : idCandidates[0];
     let scoped: Element[] = all;
     if (anchorEl) {
       const startIdx = all.indexOf(anchorEl);
@@ -314,6 +329,7 @@ async function extractHeaders(page: Page, anchorId: string): Promise<DocHeader[]
       }
     }
 
+    // Strategy 1: legacy HTML tables — only ones within this request's own section
     const tables = scoped.filter(el => el.tagName === 'TABLE') as HTMLTableElement[];
     for (const table of tables) {
       const ths = Array.from(table.querySelectorAll('th')).map(
@@ -333,6 +349,38 @@ async function extractHeaders(page: Page, anchorId: string): Promise<DocHeader[]
         });
       }
     }
+    if (result.length > 0) return result;
+
+    // Strategy 2: new div-based layout — same shape as extractParams's Strategy 2,
+    // but looking for the "Headers" subsection instead of "Query Parameters".
+    const expandedPanels = scoped.filter(el =>
+      el.matches?.('.showhideWrapper, [class*="showhide"]')
+    );
+    const containers: Element[] = expandedPanels.length > 0 ? expandedPanels : scoped;
+
+    for (const container of containers) {
+      const h4s = Array.from(container.querySelectorAll('h4'));
+      for (const h4 of h4s) {
+        if (!(h4 as HTMLElement).innerText.includes('Headers')) continue;
+        const section = h4.parentElement?.parentElement;
+        if (!section) continue;
+        const nameEls = Array.from(section.querySelectorAll('.docs-label-primary'));
+        for (const nameEl of nameEls) {
+          const name = (nameEl as HTMLElement).innerText.trim();
+          if (!name) continue;
+          const row = nameEl.closest('div');
+          const requiredEl = row?.querySelector('.text-docs-amethyst-accent');
+          const descEl = row?.querySelector('.show-hide-params-desc, .docs-s-body-regular');
+          result.push({
+            name,
+            required: !!requiredEl,
+            description: (descEl as HTMLElement)?.innerText?.trim() ?? '',
+          });
+        }
+        if (result.length > 0) return result;
+      }
+    }
+
     return result;
   }, anchorId);
 }
@@ -358,7 +406,13 @@ async function extractTryOut(page: Page, requestName: string, anchorId: string):
     // Click the Open Builder button that belongs to THIS section (matched by anchor id),
     // not just the first one on the page — critical for long pages with many sections.
     const clicked = await page.evaluate((id: string): boolean => {
-      const section = document.getElementById(id);
+      // Prefer the real h2 section over a duplicate-id "preview" heading (h5)
+      // some pages embed near the end of the PRECEDING section — see the
+      // identical fix + explanation in extractParams's sectionElements().
+      const idCandidates = Array.from(document.querySelectorAll(`[id="${id}"]`));
+      const section = idCandidates.length > 1
+        ? (idCandidates.find(el => el.querySelector('h2')) ?? idCandidates[idCandidates.length - 1])
+        : idCandidates[0];
       if (!section) return false;
       // The "Open Builder" button is a DIRECT child of the flex row that contains the heading.
       // Using querySelector finds nested buttons (like the copy-link button) first — wrong.
@@ -400,7 +454,7 @@ async function extractTryOut(page: Page, requestName: string, anchorId: string):
     });
 
     // Split into params vs headers based on known header names
-    const HEADER_KEYS = new Set(['api_key', 'access_token', 'delivery_token', 'management_token', 'branch', 'x-cs-variant-uid']);
+    const HEADER_KEYS = new Set(['api_key', 'access_token', 'delivery_token', 'management_token', 'branch', 'x-cs-variant-uid', 'authtoken', 'organization_uid']);
     for (const f of fields) {
       if (HEADER_KEYS.has(f.name)) headers.push(f);
       else params.push(f);

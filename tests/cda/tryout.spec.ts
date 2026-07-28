@@ -46,10 +46,12 @@ const scrapedRequests = fs.existsSync(scrapedPath)
 const RESULTS_PATH = path.join(__dirname, '../../reports/tryout-results.json');
 const INDIVIDUAL_DIR = path.join(__dirname, '../../reports/individual');
 
-// Each test saves to its own file — retry just overwrites that one file, never touches others
-function saveResult(result: TryOutTestResult): void {
+// Each test saves to its own file — retry just overwrites that one file, never touches others.
+// requestName alone can collide across modules — fileKey disambiguates the
+// filename without changing requestName itself (the comparator matches on that field).
+function saveResult(result: TryOutTestResult, fileKey?: string): void {
   fs.mkdirSync(INDIVIDUAL_DIR, { recursive: true });
-  const safeName = result.requestName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  const safeName = (fileKey ?? result.requestName).replace(/[^a-z0-9]/gi, '_').toLowerCase();
   fs.writeFileSync(
     path.join(INDIVIDUAL_DIR, `${safeName}.json`),
     JSON.stringify(result, null, 2)
@@ -114,15 +116,24 @@ test.describe('Phase 2 — Live Try Out Panel Tests', () => {
   const targets = scrapedRequests.length > 0
     ? scrapedRequests.map((r: any) => ({
         name: r.doc.name,
+        module: r.doc.module,
         url: r.doc.docUrl,
         method: r.doc.method,
       }))
     : [
-        { name: 'Content Types', url: 'https://www.contentstack.com/docs/developers/apis/content-delivery-api/content-types#get-all-content-types', method: 'GET' },
+        { name: 'Content Types', module: 'content-types', url: 'https://www.contentstack.com/docs/developers/apis/content-delivery-api/content-types#get-all-content-types', method: 'GET' },
       ];
 
+  // Request names can repeat across modules — Playwright requires unique test
+  // titles, so qualify with the module whenever the name collides.
+  const nameCounts: Record<string, number> = {};
+  for (const t of targets) nameCounts[t.name] = (nameCounts[t.name] ?? 0) + 1;
+
   for (const target of targets) {
-    test(`Try Out: ${target.name}`, async ({ page }) => {
+    const title = nameCounts[target.name] > 1
+      ? `Try Out: [${target.module}] ${target.name}`
+      : `Try Out: ${target.name}`;
+    test(title, async ({ page }) => {
       const flags: string[] = [];
       let defaultResponseCode: number | undefined;
       let actualResponseCode: number | undefined;
@@ -182,7 +193,7 @@ test.describe('Phase 2 — Live Try Out Panel Tests', () => {
             defaultResponseCode,
             passed: true,
             flags,
-          });
+          }, `${target.module}_${target.name}`);
           return;
         }
         await openBtn.click();
@@ -230,7 +241,7 @@ test.describe('Phase 2 — Live Try Out Panel Tests', () => {
       if (!hasSendBtn) {
         flags.push('❌  Send Request button (swaggerButton) not found');
         passed = false;
-        saveResult({ requestName: target.name, endpoint: target.url, method: target.method, docUrl: target.url, defaultResponseCode, actualResponseCode, passed, flags });
+        saveResult({ requestName: target.name, endpoint: target.url, method: target.method, docUrl: target.url, defaultResponseCode, actualResponseCode, passed, flags }, `${target.module}_${target.name}`);
         return;
       }
 
@@ -302,7 +313,7 @@ test.describe('Phase 2 — Live Try Out Panel Tests', () => {
         responseBodyKeys,
         passed,
         flags,
-      });
+      }, `${target.module}_${target.name}`);
 
       // Assert — skip hard fail for known env constraints and no-content modules
       if (actualResponseCode !== undefined && !isSkippedRequest && !(actualResponseCode === 422 && isNoContentModule)) {
@@ -318,13 +329,10 @@ test.describe('Phase 2 — Live Try Out Panel Tests', () => {
     });
   }
 
-  test.afterAll(async () => {
-    // Consolidate all individual result files into one JSON
-    const files = fs.existsSync(INDIVIDUAL_DIR) ? fs.readdirSync(INDIVIDUAL_DIR) : [];
-    const all: TryOutTestResult[] = files
-      .filter(f => f.endsWith('.json'))
-      .map(f => JSON.parse(fs.readFileSync(path.join(INDIVIDUAL_DIR, f), 'utf-8')));
-    fs.writeFileSync(RESULTS_PATH, JSON.stringify(all, null, 2));
-    console.log(`\n📝  Try Out results consolidated (${all.length} requests) → ${RESULTS_PATH}`);
-  });
+  // Consolidation into RESULTS_PATH happens in a standalone post-process step
+  // (src/shared/scripts/consolidateTryout.ts), run after this whole `playwright
+  // test` process exits — NOT here. With fullyParallel + multiple workers,
+  // test.afterAll in a describe block fires once per worker (each worker only
+  // sees its own shard's tests), so it can never reliably see every worker's
+  // files — see consolidateTryout.ts for the full explanation.
 });
