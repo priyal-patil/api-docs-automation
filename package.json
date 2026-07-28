@@ -4,7 +4,7 @@
   "description": "Automated testing for Contentstack API documentation — scraping, Try Out validation, Postman comparison, and direct API tests",
   "scripts": {
     "scrape": "ts-node src/cda/scraper/scrapeAll.ts",
-    "tryout": "playwright test tests/cda/tryout.spec.ts --reporter=html ; ts-node src/shared/scripts/consolidateTryout.ts cda",
+    "tryout": "playwright test tests/cda/tryout.spec.ts --reporter=html",
     "newman": "ts-node src/cda/postman/runNewman.ts",
     "compare": "ts-node src/cda/postman/compare.ts",
     "api-test": "vitest run tests/cda/api/",
@@ -12,7 +12,7 @@
     "run-all": "npm run scrape && npm run tryout && npm run newman && npm run compare && npm run api-test && npm run report",
 
     "scrape:cma": "ts-node src/cma/scraper/scrapeAllCMA.ts",
-    "tryout:cma": "playwright test tests/cma/tryout-cma.spec.ts --reporter=html ; ts-node src/shared/scripts/consolidateTryout.ts cma",
+    "tryout:cma": "playwright test tests/cma/tryout-cma.spec.ts --reporter=html",
     "newman:cma": "ts-node src/cma/postman/runNewmanCMA.ts",
     "compare:cma": "ts-node src/cma/postman/compareCMA.ts",
     "report:cma": "ts-node src/shared/reporter/generateReport.ts --cma",
