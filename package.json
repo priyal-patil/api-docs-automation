@@ -4,7 +4,7 @@
   "description": "Automated testing for Contentstack API documentation — scraping, Try Out validation, Postman comparison, and direct API tests",
   "scripts": {
     "scrape": "ts-node src/cda/scraper/scrapeAll.ts",
-    "tryout": "playwright test tests/cda/tryout.spec.ts --reporter=html",
+    "tryout": "playwright test tests/cda/tryout.spec.ts --reporter=html ; ts-node src/shared/scripts/consolidateTryout.ts cda",
     "newman": "ts-node src/cda/postman/runNewman.ts",
     "compare": "ts-node src/cda/postman/compare.ts",
     "api-test": "vitest run tests/cda/api/",
@@ -12,46 +12,53 @@
     "run-all": "npm run scrape && npm run tryout && npm run newman && npm run compare && npm run api-test && npm run report",
 
     "scrape:cma": "ts-node src/cma/scraper/scrapeAllCMA.ts",
-    "tryout:cma": "playwright test tests/cma/tryout-cma.spec.ts --reporter=html",
+    "tryout:cma": "playwright test tests/cma/tryout-cma.spec.ts --reporter=html ; ts-node src/shared/scripts/consolidateTryout.ts cma",
     "newman:cma": "ts-node src/cma/postman/runNewmanCMA.ts",
     "compare:cma": "ts-node src/cma/postman/compareCMA.ts",
     "report:cma": "ts-node src/shared/reporter/generateReport.ts --cma",
+    "publish:cma": "ts-node src/shared/reporter/publishToDashboard.ts --cma",
     "cma": "npm run scrape:cma && npm run tryout:cma && npm run newman:cma && npm run compare:cma && npm run report:cma",
 
     "scrape:analytics": "ts-node src/analytics/scraper/scrapeAllAnalytics.ts",
     "newman:analytics": "ts-node src/analytics/postman/runNewmanAnalytics.ts",
     "compare:analytics": "ts-node src/analytics/postman/compareAnalytics.ts",
     "report:analytics": "ts-node src/shared/reporter/generateReport.ts --analytics",
+    "publish:analytics": "ts-node src/shared/reporter/publishToDashboard.ts --analytics",
     "analytics": "npm run scrape:analytics && npm run newman:analytics && npm run compare:analytics && npm run report:analytics",
 
     "scrape:automations": "ts-node src/automations/scraper/scrapeAllAutomations.ts",
     "newman:automations": "ts-node src/automations/postman/runNewmanAutomations.ts",
     "compare:automations": "ts-node src/automations/postman/compareAutomations.ts",
     "report:automations": "ts-node src/shared/reporter/generateReport.ts --automations",
+    "publish:automations": "ts-node src/shared/reporter/publishToDashboard.ts --automations",
     "automations": "npm run scrape:automations && npm run newman:automations && npm run compare:automations && npm run report:automations",
 
     "scrape:brandkit": "ts-node src/brandkit/scraper/scrapeAllBrandKit.ts",
     "newman:brandkit": "ts-node src/brandkit/postman/runNewmanBrandKit.ts",
     "compare:brandkit": "ts-node src/brandkit/postman/compareBrandKit.ts",
     "report:brandkit": "ts-node src/shared/reporter/generateReport.ts --brandkit",
+    "publish:brandkit": "ts-node src/shared/reporter/publishToDashboard.ts --brandkit",
     "brandkit": "npm run scrape:brandkit && npm run newman:brandkit && npm run compare:brandkit && npm run report:brandkit",
 
     "scrape:genai": "ts-node src/genai/scraper/scrapeAllGenAI.ts",
     "newman:genai": "ts-node src/genai/postman/runNewmanGenAI.ts",
     "compare:genai": "ts-node src/genai/postman/compareGenAI.ts",
     "report:genai": "ts-node src/shared/reporter/generateReport.ts --genai",
+    "publish:genai": "ts-node src/shared/reporter/publishToDashboard.ts --genai",
     "genai": "npm run scrape:genai && npm run newman:genai && npm run compare:genai && npm run report:genai",
 
     "scrape:knowledgevault": "ts-node src/knowledgevault/scraper/scrapeAllKnowledgeVault.ts",
     "newman:knowledgevault": "ts-node src/knowledgevault/postman/runNewmanKnowledgeVault.ts",
     "compare:knowledgevault": "ts-node src/knowledgevault/postman/compareKnowledgeVault.ts",
     "report:knowledgevault": "ts-node src/shared/reporter/generateReport.ts --knowledgevault",
+    "publish:knowledgevault": "ts-node src/shared/reporter/publishToDashboard.ts --knowledgevault",
     "knowledgevault": "npm run scrape:knowledgevault && npm run newman:knowledgevault && npm run compare:knowledgevault && npm run report:knowledgevault",
 
     "scrape:imagedelivery": "ts-node src/imagedelivery/scraper/scrapeAllImageDelivery.ts",
     "tryout:imagedelivery": "playwright test tests/imagedelivery/tryout-imagedelivery.spec.ts --reporter=html",
     "compare:imagedelivery": "ts-node src/imagedelivery/compare/compareImageDelivery.ts",
     "report:imagedelivery": "ts-node src/shared/reporter/generateReport.ts --imagedelivery",
+    "publish:imagedelivery": "ts-node src/shared/reporter/publishToDashboard.ts --imagedelivery",
     "imagedelivery": "npm run scrape:imagedelivery && npm run tryout:imagedelivery && npm run compare:imagedelivery && npm run report:imagedelivery",
 
     "scrape:lytics": "ts-node src/lytics/scraper/scrapeAllLytics.ts",
@@ -59,6 +66,7 @@
     "swagger:lytics": "ts-node src/lytics/swagger/runSwaggerLytics.ts",
     "compare:lytics": "ts-node src/lytics/swagger/compareLytics.ts",
     "report:lytics": "ts-node src/shared/reporter/generateReport.ts --lytics",
+    "publish:lytics": "ts-node src/shared/reporter/publishToDashboard.ts --lytics",
     "lytics": "npm run scrape:lytics && npm run tryout:lytics && npm run swagger:lytics && npm run compare:lytics && npm run report:lytics",
 
     "scrape:personalize": "ts-node src/personalize/scraper/scrapeAllPersonalize.ts",
@@ -66,6 +74,7 @@
     "swagger:personalize": "ts-node src/personalize/swagger/runSwaggerPersonalize.ts",
     "compare:personalize": "ts-node src/personalize/swagger/comparePersonalize.ts",
     "report:personalize": "ts-node src/shared/reporter/generateReport.ts --personalize",
+    "publish:personalize": "ts-node src/shared/reporter/publishToDashboard.ts --personalize",
     "personalize": "npm run scrape:personalize && npm run tryout:personalize && npm run swagger:personalize && npm run compare:personalize && npm run report:personalize",
 
     "scrape:personalizeedge": "ts-node src/personalizeedge/scraper/scrapeAllPersonalizeEdge.ts",
@@ -73,6 +82,7 @@
     "swagger:personalizeedge": "ts-node src/personalizeedge/swagger/runSwaggerPersonalizeEdge.ts",
     "compare:personalizeedge": "ts-node src/personalizeedge/swagger/comparePersonalizeEdge.ts",
     "report:personalizeedge": "ts-node src/shared/reporter/generateReport.ts --personalizeedge",
+    "publish:personalizeedge": "ts-node src/shared/reporter/publishToDashboard.ts --personalizeedge",
     "personalizeedge": "npm run scrape:personalizeedge && npm run tryout:personalizeedge && npm run swagger:personalizeedge && npm run compare:personalizeedge && npm run report:personalizeedge",
 
     "scrape:launch": "ts-node src/launch/scraper/scrapeAllLaunch.ts",
@@ -80,6 +90,7 @@
     "swagger:launch": "ts-node src/launch/swagger/runSwaggerLaunch.ts",
     "compare:launch": "ts-node src/launch/swagger/compareLaunch.ts",
     "report:launch": "ts-node src/shared/reporter/generateReport.ts --launch",
+    "publish:launch": "ts-node src/shared/reporter/publishToDashboard.ts --launch",
     "launch": "npm run scrape:launch && npm run tryout:launch && npm run swagger:launch && npm run compare:launch && npm run report:launch",
 
     "scrape:graphql": "ts-node src/graphql/scraper/scrapeAllGraphQL.ts",
@@ -87,16 +98,19 @@
     "newman:graphql": "ts-node src/graphql/postman/runNewmanGraphQL.ts",
     "compare:graphql": "ts-node src/graphql/postman/compareGraphQL.ts",
     "report:graphql": "ts-node src/shared/reporter/generateReport.ts --graphql",
+    "publish:graphql": "ts-node src/shared/reporter/publishToDashboard.ts --graphql",
     "graphql": "npm run scrape:graphql && npm run tryout:graphql && npm run newman:graphql && npm run compare:graphql && npm run report:graphql",
 
     "scrape:administration": "ts-node src/administration/scraper/scrapeAllAdministration.ts",
     "compare:administration": "ts-node src/administration/compareAdministration.ts",
     "report:administration": "ts-node src/shared/reporter/generateReport.ts --administration",
+    "publish:administration": "ts-node src/shared/reporter/publishToDashboard.ts --administration",
     "administration": "npm run scrape:administration && npm run compare:administration && npm run report:administration",
 
     "scrape:scim": "ts-node src/scim/scraper/scrapeAllSCIM.ts",
     "compare:scim": "ts-node src/scim/compareSCIM.ts",
     "report:scim": "ts-node src/shared/reporter/generateReport.ts --scim",
+    "publish:scim": "ts-node src/shared/reporter/publishToDashboard.ts --scim",
     "scim": "npm run scrape:scim && npm run compare:scim && npm run report:scim",
 
     "test": "playwright test"
