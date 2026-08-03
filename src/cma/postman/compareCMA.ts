@@ -87,8 +87,9 @@ export async function runComparisonCMA(): Promise<ComparisonResult[]> {
       name: f.name, type: f.type, required: false, description: '',
     }));
 
-    const docParamNames    = new Set(effectiveDocParams.map(p => normParam(p.name)));
-    const tryOutParamNames = new Set(tryOut.params.map(p => normParam(p.name)));
+    const docParamNames     = new Set(effectiveDocParams.map(p => normParam(p.name)));
+    const tryOutParamNames  = new Set(tryOut.params.map(p => normParam(p.name)));
+    const tryOutHeaderNames = new Set(tryOut.headers.map(h => normParam(h.name)));
 
     // Postman-derived name sets (empty when no matching Postman request) — computed
     // upfront so the Doc ↔ Try Out checks can also use them to suppress noise.
@@ -100,13 +101,29 @@ export async function runComparisonCMA(): Promise<ComparisonResult[]> {
     );
     const docHeaderNames = new Set(doc.headers.map(h => norm(h.name)));
 
+    // Names already flagged as a near-match naming inconsistency this request —
+    // suppresses the same pair's noise in later checks and avoids duplicate notes.
+    const nearMatchNoted = new Set<string>();
+
     // Only compare Doc ↔ Try Out when the scraper found actual doc tables
     if (doc.params.length > 0) {
       for (const p of doc.params) {
         // Body/form-data fields (asset[upload]) are entered in the body editor, not as param inputs
         if (isBodyField(p.name)) continue;
         if (GLOBAL_HEADERS.has(normParam(p.name))) continue;
-        if (!tryOutParamNames.has(normParam(p.name))) {
+        const n = normParam(p.name);
+        if (!tryOutParamNames.has(n) && !tryOutHeaderNames.has(n)) {
+          const near = findNearMatch(n, tryOutParamNames, tryOutHeaderNames);
+          if (near) {
+            nearMatchNoted.add(n); nearMatchNoted.add(near);
+            mismatches.push({
+              type: 'name_mismatch', field: p.name,
+              source: 'Doc ↔ Try Out',
+              detail: `Doc calls this param "${p.name}" but the Try Out panel/Postman call it something else matching "${near}" — likely a doc naming inconsistency, not a missing field`,
+              severity: 'info',
+            });
+            continue;
+          }
           mismatches.push({
             type: 'missing_in_tryout', field: p.name,
             source: 'Doc → Try Out',
@@ -120,7 +137,9 @@ export async function runComparisonCMA(): Promise<ComparisonResult[]> {
         // but the doc's param table legitimately documents them elsewhere
         if (GLOBAL_HEADERS.has(normParam(f.name))) continue;
         if (pathVarNames.has(normParam(f.name))) continue;
-        if (!docParamNames.has(normParam(f.name))) {
+        const n = normParam(f.name);
+        if (nearMatchNoted.has(n)) continue;
+        if (!docParamNames.has(n) && !docHeaderNames.has(n)) {
           mismatches.push({
             type: 'extra_in_tryout', field: f.name,
             source: 'Try Out → Doc',
@@ -135,8 +154,10 @@ export async function runComparisonCMA(): Promise<ComparisonResult[]> {
       // Postman active params missing from doc/tryout (only flag actively-sent params).
       // Cross-check doc headers too — docs sometimes list the same name as a header.
       for (const p of postmanReq.params.filter(p => !p.disabled)) {
-        if (!docParamNames.has(norm(p.key)) && !tryOutParamNames.has(norm(p.key))
-            && !docHeaderNames.has(norm(p.key))) {
+        const n = norm(p.key);
+        if (nearMatchNoted.has(n)) continue;
+        if (!docParamNames.has(n) && !tryOutParamNames.has(n)
+            && !docHeaderNames.has(n) && !tryOutHeaderNames.has(n)) {
           mismatches.push({
             type: 'missing_in_doc', field: p.key,
             source: 'Postman → Doc/Try Out',
@@ -152,7 +173,9 @@ export async function runComparisonCMA(): Promise<ComparisonResult[]> {
         const n = normParam(p.name);
         if (isBodyField(p.name)) continue;
         if (GLOBAL_HEADERS.has(n)) continue;
+        if (nearMatchNoted.has(n)) continue;
         if (postmanAllParamNames.has(n) || pathVarNames.has(n) || postmanHeaderNames.has(n)) continue;
+        if (findNearMatch(n, postmanAllParamNames, postmanHeaderNames)) continue;
         mismatches.push({
           type: 'missing_in_postman', field: p.name,
           source: 'Doc/Try Out → Postman',
@@ -282,12 +305,13 @@ export async function runComparisonCMA(): Promise<ComparisonResult[]> {
       // Newman execution failure
       if (!newmanResult.passed) {
         const isNoTestData = newmanResult.error?.includes('Unresolved variable');
+        const apiError = extractApiError(newmanResult.responseBodyRaw);
         mismatches.push({
           type: 'newman_failure',
           source: 'Postman (Newman)',
           detail: isNoTestData
             ? `Postman request returned ${newmanResult.responseCode} — URL has unresolved {{variable}} (no test data for this UID)`
-            : `Postman request returned ${newmanResult.responseCode}${newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
+            : `Postman request returned ${newmanResult.responseCode}${apiError ? ` — ${apiError}` : newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
           severity: isNoTestData ? 'warning' : 'error',
         });
       }
@@ -303,12 +327,13 @@ export async function runComparisonCMA(): Promise<ComparisonResult[]> {
     // Newman failure check when there is no tryOutResult (handles cases not caught above)
     if (newmanResult && !tryOutResult && !newmanResult.passed) {
       const isNoTestData = newmanResult.error?.includes('Unresolved variable');
+      const apiError = extractApiError(newmanResult.responseBodyRaw);
       mismatches.push({
         type: 'newman_failure',
         source: 'Postman (Newman)',
         detail: isNoTestData
           ? `Postman request returned ${newmanResult.responseCode} — URL has unresolved {{variable}} (no test data for this UID)`
-          : `Postman request returned ${newmanResult.responseCode}${newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
+          : `Postman request returned ${newmanResult.responseCode}${apiError ? ` — ${apiError}` : newmanResult.error ? ` — ${newmanResult.error}` : ''} when executed via Newman`,
         severity: isNoTestData ? 'warning' : 'error',
       });
     }
@@ -395,6 +420,23 @@ function sortedWords(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).sort().join('');
 }
 
+// Catches doc/Try Out/Postman naming inconsistencies for the SAME underlying
+// param — e.g. doc says "locale" while Try Out and Postman both use
+// "locale_code". Without this, one real naming inconsistency was reported as
+// three separate unrelated-looking findings (missing_in_tryout, extra_in_tryout,
+// missing_in_postman) instead of a single clear one. Length-gated at 4 chars to
+// avoid over-matching short generic names like "uid" or "id".
+function findNearMatch(name: string, ...sets: Array<Set<string>>): string | undefined {
+  if (name.length < 4) return undefined;
+  for (const set of sets) {
+    for (const candidate of set) {
+      if (candidate.length < 4) continue;
+      if (candidate.includes(name) || name.includes(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
 function findByName<T>(
   docName: string,
   list: T[],
@@ -411,6 +453,26 @@ function findByName<T>(
       })
     // 3. Same words in any order (catches "Equals Within Group Operator" vs "Equals Operator Within Group")
     ?? list.find(item => sortedWords(getName(item)) === targetSorted);
+}
+
+// Pull the actual API error message/code out of a Newman response body so the
+// report is self-explanatory (e.g. "title is not unique" tells you it's a
+// stale-test-data collision, not a genuine collection/docs bug) instead of
+// just "returned 422", which forces someone to go dig through raw JSON.
+function extractApiError(raw: string | undefined): string | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw.trim());
+    const parts: string[] = [];
+    if (parsed.error_message) parts.push(parsed.error_message);
+    if (parsed.errors && typeof parsed.errors === 'object') {
+      for (const [field, msgs] of Object.entries(parsed.errors)) {
+        const msgText = Array.isArray(msgs) ? msgs.join(', ') : String(msgs);
+        parts.push(`${field}: ${msgText}`);
+      }
+    }
+    return parts.length ? parts.join(' — ') : undefined;
+  } catch { return undefined; }
 }
 
 function extractKeys(raw: string | undefined | null): string[] | undefined {

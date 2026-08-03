@@ -59,6 +59,25 @@ jobs:
       - name: Phase 3 — Generate report + send Slack report
         run: npm run report:scim
 
+      - name: Publish report to dashboard
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.DASHBOARD_DATA_TOKEN }}
+        run: |
+          npm run publish:scim
+          git clone https://x-access-token:${GH_TOKEN}@github.com/priyal-patil/docs-automation-dashboard-data.git /tmp/dashboard-data
+          cd /tmp/dashboard-data
+          node scripts/publish.js "$GITHUB_WORKSPACE/reports/dashboard-scim.json"
+          git config user.name "dashboard-publisher"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Publish api-docs-automation/scim report ($GITHUB_RUN_ID)" || exit 0
+          for i in 1 2 3 4 5; do
+            git push origin main && break
+            git pull --rebase origin main
+            sleep $((RANDOM % 5 + 1))
+          done
+
       - name: Upload HTML report
         uses: actions/upload-artifact@v4
         if: always()
