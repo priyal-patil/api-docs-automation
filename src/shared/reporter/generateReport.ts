@@ -3,6 +3,7 @@ import * as path from 'path';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import { RunReport, TryOutTestResult, ComparisonResult, ApiTestResult, NewmanResult } from '../../../config/types';
+import { computeTotals } from './computeTotals';
 
 dotenv.config();
 
@@ -60,24 +61,9 @@ export async function generateReport(): Promise<void> {
   const apiTestResults: ApiTestResult[]       = loadJson(`api-test-results${SUFFIX}.json`, []);
   const newmanResults: NewmanResult[]         = loadJson(`newman-results${SUFFIX}.json`, []);
 
-  const totalRequests = comparisonResults.length || tryOutResults.length || apiTestResults.length;
-  const passed  = comparisonResults.filter(r => r.status === 'pass').length;
-  const warnings = comparisonResults.filter(r => r.status === 'warning').length;
-  // A single failing request commonly shows up in MULTIPLE result arrays —
-  // e.g. a Newman failure also flips its comparisonResults status to 'fail'
-  // (confirmed: for one CDA run, comparisonResults' 7 fails were a full
-  // subset of newmanResults' 17). Naively summing arrays double/triple-counts
-  // those. But newmanResults can ALSO contain failures with NO doc match at
-  // all (confirmed: 10 "Queries" module failures never reached
-  // comparisonResults because findByName had nothing to match), so simply
-  // dropping one array undercounts instead. Dedupe by request name across
-  // every source so each failing request is counted exactly once.
-  const failedNames = new Set<string>();
-  comparisonResults.filter(r => r.status === 'fail').forEach(r => failedNames.add(r.requestName));
-  tryOutResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
-  apiTestResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
-  newmanResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
-  const failed = failedNames.size;
+  const { totalRequests, passed, warnings, failed } = computeTotals(
+    comparisonResults, tryOutResults, apiTestResults, newmanResults,
+  );
 
   const report: RunReport = {
     runAt: new Date().toISOString(),
