@@ -1,13 +1,15 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import dotenv from 'dotenv';
 import { RunReport, TryOutTestResult, ComparisonResult, ApiTestResult, NewmanResult } from '../../../config/types';
-import { computeTotals } from './computeTotals';
+import { computeTotals, classifyItems, createSlugger, Outcome } from './computeTotals';
 
 dotenv.config();
 
 const REPORTS_DIR = path.join(__dirname, '../../../reports');
 const GITHUB_REPO = 'priyal-patil/api-docs-automation';
+const PROJECT = 'api-docs-automation';
 
 // Kept in sync with the API_FLAGS table in generateReport.ts (flag/label/suffix),
 // plus the two dashboard-only fields (suiteLabel, docUrl) that generateReport.ts
@@ -55,6 +57,21 @@ interface DashboardFailedItem {
   docLink: string | null;
 }
 
+interface DashboardItem {
+  name: string;
+  status: Outcome | 'skipped';
+  detail: string | null;
+  docLink: string | null;
+  reportUrl: string | null;
+}
+
+interface DashboardWarning {
+  name: string;
+  detail: string | null;
+  docLink: string | null;
+  reportUrl: string | null;
+}
+
 interface DashboardReport {
   schemaVersion: 1;
   project: 'api-docs-automation';
@@ -77,6 +94,8 @@ interface DashboardReport {
   };
   failedItems: DashboardFailedItem[];
   docLinks: string[];
+  items: DashboardItem[];
+  warnings: DashboardWarning[];
 }
 
 /**
@@ -141,22 +160,89 @@ function detailFor(
   return null;
 }
 
+/**
+ * Per-request doc link, when one is known. Only comparisonResults and
+ * tryOutResults carry a per-request docUrl (they're built from scraping the
+ * doc page's Try Out panel for a specific request); apiTestResults and
+ * newmanResults only know endpoint/method, not which doc section it came
+ * from. For requests only covered by those two arrays (e.g. Administration
+ * and SCIM, which are noLiveTryOut + noPostman and so only ever populate
+ * apiTestResults), we fall back to the suite-level DOC_URL — every item
+ * still gets *a* docLink, just not always a request-specific one.
+ */
+function docLinkFor(requestName: string, report: RunReport): string {
+  const comparison = report.comparisonResults.find(r => r.requestName === requestName);
+  if (comparison) return comparison.docUrl;
+
+  const tryOut = report.tryOutResults.find(r => r.requestName === requestName);
+  if (tryOut) return tryOut.docUrl;
+
+  return DOC_URL;
+}
+
+/**
+ * Copies this run's HTML report (already written by generateReport.ts) into
+ * a local staging directory so the workflow step can pass
+ * `<dashboard.json>:<staging-dir>` to docs-automation-dashboard-data's
+ * scripts/publish.js, which copies it into
+ * data/<project>/<suite>/reports/run-report.html — the exact path
+ * items[].reportUrl / warnings[].reportUrl point into (see SCHEMA.md /
+ * PUBLISHING.md). Returns null (and leaves nothing behind) if the HTML
+ * report isn't there for some reason, so the workflow step can gracefully
+ * fall back to publishing without per-item report links rather than failing.
+ */
+function stageHtmlReport(): string | null {
+  const htmlSrc = path.join(REPORTS_DIR, `run-report${SUFFIX}.html`);
+  if (!fs.existsSync(htmlSrc)) {
+    console.warn(`⚠️  ${htmlSrc} not found — skipping per-item report staging`);
+    return null;
+  }
+
+  const stagingDir = path.join(os.tmpdir(), `reports-${SUITE}`);
+  fs.rmSync(stagingDir, { recursive: true, force: true });
+  fs.mkdirSync(stagingDir, { recursive: true });
+  fs.copyFileSync(htmlSrc, path.join(stagingDir, 'run-report.html'));
+  console.log(`📎  Staged HTML report → ${stagingDir}/run-report.html`);
+  return stagingDir;
+}
+
 function buildDashboardReport(report: RunReport): DashboardReport {
   const runId = process.env.GITHUB_RUN_ID ?? '';
   const runUrl = runId ? `https://github.com/${GITHUB_REPO}/actions/runs/${runId}` : '';
   const artifactsUrl = runId ? `${runUrl}#artifacts` : '';
 
-  const failedNames = new Set<string>();
-  report.comparisonResults.filter(r => r.status === 'fail').forEach(r => failedNames.add(r.requestName));
-  report.tryOutResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
-  report.apiTestResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
-  report.newmanResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
+  // Single source of truth for per-request classification (same map
+  // computeTotals.ts builds `report.totals` from) — every checked request,
+  // not just failures.
+  const classified = classifyItems(
+    report.comparisonResults, report.tryOutResults, report.apiTestResults, report.newmanResults,
+  );
 
-  const failedItems: DashboardFailedItem[] = Array.from(failedNames).map(name => ({
-    name,
-    detail: detailFor(name, report),
-    docLink: null,
-  }));
+  // Same slugger, fed request names in the same order (comparisonResults,
+  // then tryOutResults, then apiTestResults, then newmanResults) that
+  // generateReport.ts's buildHtmlReport() feeds its own slugger — so the
+  // slug computed here always matches the `<tr id="...">` anchor already
+  // present in run-report<SUFFIX>.html for that same request name.
+  const slugger = createSlugger();
+
+  const items: DashboardItem[] = classified.map(({ name, status }) => {
+    const slug = slugger(name);
+    return {
+      name,
+      status,
+      detail: status === 'pass' ? null : detailFor(name, report),
+      docLink: docLinkFor(name, report),
+      reportUrl: `data/${PROJECT}/${SUITE}/reports/run-report.html#${slug}`,
+    };
+  });
+
+  const warnings: DashboardWarning[] = items
+    .filter(i => i.status === 'warning')
+    .map(({ name, detail, docLink, reportUrl }) => ({ name, detail, docLink, reportUrl }));
+
+  const failedItems: DashboardFailedItem[] = items
+    .filter(i => i.status === 'fail')
+    .map(({ name, detail, docLink }) => ({ name, detail, docLink }));
 
   return {
     schemaVersion: 1,
@@ -180,6 +266,8 @@ function buildDashboardReport(report: RunReport): DashboardReport {
     },
     failedItems,
     docLinks: [DOC_URL],
+    items,
+    warnings,
   };
 }
 
@@ -190,6 +278,11 @@ function main(): void {
   const outPath = path.join(REPORTS_DIR, `dashboard${SUFFIX}.json`);
   fs.writeFileSync(outPath, JSON.stringify(dashboardReport, null, 2));
   console.log(`📤  Dashboard report → ${outPath}`);
+
+  // Stage the HTML report for the workflow step to optionally pass to
+  // scripts/publish.js as ":<dir>" — see stageHtmlReport() for why this can
+  // legitimately come back null.
+  stageHtmlReport();
 }
 
 main();
