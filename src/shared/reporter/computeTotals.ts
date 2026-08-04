@@ -28,13 +28,21 @@ import { TryOutTestResult, ComparisonResult, ApiTestResult, NewmanResult } from 
  * scope) -- importing from it would re-trigger a full report run and Slack
  * email every time this function is needed.
  */
-export function computeTotals(
+export type Outcome = 'pass' | 'warning' | 'fail';
+
+/**
+ * The single canonical classification step described above: one Map entry
+ * per distinct request name across all 4 result arrays, classified exactly
+ * once. Both `computeTotals` (aggregate counts) and `classifyItems`
+ * (per-request list, for dashboard items[]/warnings[]) build on this same
+ * map so the two never disagree.
+ */
+function buildOutcomeByName(
   comparisonResults: ComparisonResult[],
   tryOutResults: TryOutTestResult[],
   apiTestResults: ApiTestResult[],
   newmanResults: NewmanResult[],
-): { totalRequests: number; passed: number; warnings: number; failed: number } {
-  type Outcome = 'pass' | 'warning' | 'fail';
+): Map<string, Outcome> {
   const outcomeByName = new Map<string, Outcome>();
 
   // A comparisonResults verdict is the richest signal (doc vs. live
@@ -53,6 +61,17 @@ export function computeTotals(
     if (!outcomeByName.has(r.requestName)) outcomeByName.set(r.requestName, r.passed ? 'pass' : 'fail');
   }
 
+  return outcomeByName;
+}
+
+export function computeTotals(
+  comparisonResults: ComparisonResult[],
+  tryOutResults: TryOutTestResult[],
+  apiTestResults: ApiTestResult[],
+  newmanResults: NewmanResult[],
+): { totalRequests: number; passed: number; warnings: number; failed: number } {
+  const outcomeByName = buildOutcomeByName(comparisonResults, tryOutResults, apiTestResults, newmanResults);
+
   let passed = 0, warnings = 0, failed = 0;
   for (const outcome of outcomeByName.values()) {
     if (outcome === 'pass') passed++;
@@ -61,4 +80,59 @@ export function computeTotals(
   }
 
   return { totalRequests: outcomeByName.size, passed, warnings, failed };
+}
+
+/**
+ * Every distinct request name across all 4 result arrays, classified via the
+ * exact same canonical map `computeTotals` uses — this is what dashboard
+ * items[] (and, by filtering, warnings[]) are built from, and it's also the
+ * per-name classification the HTML report's row `id` slugs are keyed off of.
+ * Order follows Map insertion order: comparisonResults first, then the first
+ * new name contributed by tryOutResults, apiTestResults, newmanResults in
+ * that order — kept stable so callers building slugs (see `createSlugger`)
+ * get deterministic, reproducible output.
+ */
+export function classifyItems(
+  comparisonResults: ComparisonResult[],
+  tryOutResults: TryOutTestResult[],
+  apiTestResults: ApiTestResult[],
+  newmanResults: NewmanResult[],
+): Array<{ name: string; status: Outcome }> {
+  const outcomeByName = buildOutcomeByName(comparisonResults, tryOutResults, apiTestResults, newmanResults);
+  return Array.from(outcomeByName.entries()).map(([name, status]) => ({ name, status }));
+}
+
+/**
+ * Returns a memoized slug function: same request name always yields the same
+ * URL-safe slug (lowercase, non-alphanumeric runs -> "-"), and distinct names
+ * that happen to slugify to the same base get a numeric suffix (`-2`, `-3`,
+ * ...) so anchors never collide within one report.
+ *
+ * generateReport.ts (HTML `<tr id="...">`) and publishToDashboard.ts
+ * (`items[].reportUrl` `#anchor`) each create their own slugger and feed it
+ * names in the same order — comparisonResults, then tryOutResults, then
+ * apiTestResults, then newmanResults — so the two independently produce
+ * identical slugs for the same request name without sharing state.
+ */
+export function createSlugger(): (name: string) => string {
+  const assigned = new Map<string, string>();
+  const nextSuffixForBase = new Map<string, number>();
+
+  return (name: string): string => {
+    const cached = assigned.get(name);
+    if (cached) return cached;
+
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
+    let slug = base;
+    if (nextSuffixForBase.has(base)) {
+      const n = nextSuffixForBase.get(base)! + 1;
+      nextSuffixForBase.set(base, n);
+      slug = `${base}-${n}`;
+    } else {
+      nextSuffixForBase.set(base, 1);
+    }
+
+    assigned.set(name, slug);
+    return slug;
+  };
 }

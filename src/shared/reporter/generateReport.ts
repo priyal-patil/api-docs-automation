@@ -3,7 +3,7 @@ import * as path from 'path';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import { RunReport, TryOutTestResult, ComparisonResult, ApiTestResult, NewmanResult } from '../../../config/types';
-import { computeTotals } from './computeTotals';
+import { computeTotals, createSlugger } from './computeTotals';
 
 dotenv.config();
 
@@ -220,8 +220,15 @@ function buildHtmlReport(report: RunReport): string {
   const statusColor = (s: string) =>
     s === 'pass' ? '#16a34a' : s === 'warning' ? '#d97706' : '#dc2626';
 
+  // One slugger shared across all 4 sections, fed in the same order
+  // (comparison, tryOut, apiTest, newman) that computeTotals.ts's
+  // buildOutcomeByName / classifyItems processes results in, so a row's id
+  // here always matches the #anchor publishToDashboard.ts generates for the
+  // same request name.
+  const slugger = createSlugger();
+
   const compRows = report.comparisonResults.map(r => `
-    <tr>
+    <tr id="${slugger(r.requestName)}">
       <td><a href="${r.docUrl}" target="_blank">${r.requestName}</a></td>
       <td><code>${r.method} ${r.endpoint}</code></td>
       <td style="color:${statusColor(r.status)};font-weight:700">${r.status.toUpperCase()}</td>
@@ -231,7 +238,7 @@ function buildHtmlReport(report: RunReport): string {
     </tr>`).join('');
 
   const tryOutRows = report.tryOutResults.map(r => `
-    <tr>
+    <tr id="${slugger(r.requestName)}">
       <td><a href="${r.docUrl}" target="_blank">${r.requestName}</a></td>
       <td>${r.method}</td>
       <td>${r.defaultResponseCode ? `<span class="badge-err">${r.defaultResponseCode} (default)</span>` : '—'}</td>
@@ -241,7 +248,7 @@ function buildHtmlReport(report: RunReport): string {
     </tr>`).join('');
 
   const apiRows = report.apiTestResults.map(r => `
-    <tr>
+    <tr id="${slugger(r.requestName)}">
       <td>${r.requestName}</td>
       <td><code>${r.method} ${r.endpoint}</code></td>
       <td>${r.expectedStatusCode}</td>
@@ -251,7 +258,7 @@ function buildHtmlReport(report: RunReport): string {
     </tr>`).join('');
 
   const newmanRows = report.newmanResults.map(r => `
-    <tr>
+    <tr id="${slugger(r.requestName)}">
       <td>${r.requestName}</td>
       <td>${r.method}</td>
       <td><span class="${r.passed ? 'badge-ok' : 'badge-err'}">${r.responseCode}</span></td>

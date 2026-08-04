@@ -67,7 +67,12 @@ jobs:
           npm run publish:administration
           git clone https://x-access-token:${GH_TOKEN}@github.com/priyal-patil/docs-automation-dashboard-data.git /tmp/dashboard-data
           cd /tmp/dashboard-data
-          node scripts/publish.js "$GITHUB_WORKSPACE/reports/dashboard-administration.json"
+          STAGING_DIR="/tmp/reports-administration"
+          if [ -d "$STAGING_DIR" ]; then
+            node scripts/publish.js "$GITHUB_WORKSPACE/reports/dashboard-administration.json:$STAGING_DIR"
+          else
+            node scripts/publish.js "$GITHUB_WORKSPACE/reports/dashboard-administration.json"
+          fi
           git config user.name "dashboard-publisher"
           git config user.email "actions@users.noreply.github.com"
           git add -A
