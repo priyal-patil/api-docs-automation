@@ -9,6 +9,7 @@
     "compare": "ts-node src/cda/postman/compare.ts",
     "api-test": "vitest run tests/cda/api/",
     "report": "ts-node src/shared/reporter/generateReport.ts",
+    "publish:cda": "ts-node src/shared/reporter/publishToDashboard.ts --cda",
     "run-all": "npm run scrape && npm run tryout && npm run newman && npm run compare && npm run api-test && npm run report",
 
     "scrape:cma": "ts-node src/cma/scraper/scrapeAllCMA.ts",

@@ -14,6 +14,7 @@ const GITHUB_REPO = 'priyal-patil/api-docs-automation';
 // extra fields aren't a natural fit to bolt onto it, so this is a small
 // deliberate duplication rather than a shared import.
 const API_FLAGS: Array<{ flag: string; suffix: string; suiteLabel: string; docUrl: string }> = [
+  { flag: '--cda',             suffix: '',                 suiteLabel: 'Content Delivery API',          docUrl: 'https://www.contentstack.com/docs/developers/apis/content-delivery-api' },
   { flag: '--cma',             suffix: '-cma',             suiteLabel: 'Content Management API',        docUrl: 'https://www.contentstack.com/docs/developers/apis/content-management-api' },
   { flag: '--analytics',       suffix: '-analytics',       suiteLabel: 'Analytics API',                 docUrl: 'https://www.contentstack.com/docs/developers/apis/analytics-api' },
   { flag: '--automations',     suffix: '-automations',     suiteLabel: 'Automations Management API',    docUrl: 'https://www.contentstack.com/docs/developers/apis/automations-management-api' },
