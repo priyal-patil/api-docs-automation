@@ -83,7 +83,7 @@ jobs:
           npm run publish:cda
           git clone https://x-access-token:${GH_TOKEN}@github.com/priyal-patil/docs-automation-dashboard-data.git /tmp/dashboard-data
           cd /tmp/dashboard-data
-          node scripts/publish.js "$GITHUB_WORKSPACE/reports/dashboard-cda.json"
+          node scripts/publish.js "$GITHUB_WORKSPACE/reports/dashboard.json"
           git config user.name "dashboard-publisher"
           git config user.email "actions@users.noreply.github.com"
           git add -A
