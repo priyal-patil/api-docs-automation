@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
 import { RunReport, TryOutTestResult, ComparisonResult, ApiTestResult, NewmanResult } from '../../../config/types';
+import { computeTotals } from './computeTotals';
 
 dotenv.config();
 
@@ -95,24 +96,16 @@ function loadRunReport(): RunReport {
   const apiTestResults: ApiTestResult[]       = loadJson(`api-test-results${SUFFIX}.json`, []);
   const newmanResults: NewmanResult[]         = loadJson(`newman-results${SUFFIX}.json`, []);
 
-  const totalRequests = comparisonResults.length || tryOutResults.length || apiTestResults.length;
-  const passed   = comparisonResults.filter(r => r.status === 'pass').length;
-  const warnings = comparisonResults.filter(r => r.status === 'warning').length;
-
-  // Same dedup logic as generateReport.ts: a failing request commonly shows
-  // up in multiple result arrays, so count each failing request name once.
-  const failedNames = new Set<string>();
-  comparisonResults.filter(r => r.status === 'fail').forEach(r => failedNames.add(r.requestName));
-  tryOutResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
-  apiTestResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
-  newmanResults.filter(r => !r.passed).forEach(r => failedNames.add(r.requestName));
+  const { totalRequests, passed, warnings, failed } = computeTotals(
+    comparisonResults, tryOutResults, apiTestResults, newmanResults,
+  );
 
   return {
     runAt: new Date().toISOString(),
     totalRequests,
     passed,
     warnings,
-    failed: failedNames.size,
+    failed,
     tryOutResults,
     comparisonResults,
     apiTestResults,
